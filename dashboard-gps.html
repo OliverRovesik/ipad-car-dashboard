@@ -385,10 +385,10 @@ function applyTailGlow(){
 
 /* ---------- 车内乘客：毛绒兔 + 贴纸脸棉花糖 ---------- */
 // 车组绕 Y 转了 180°，所以局部 +X 是驾驶侧（菲律宾左舵）、局部 +Z 是车头。
-// 乘客正常坐姿朝车头、略向内偏；跟车视角在车后，看到的是背影。
+// 乘客朝车头、略向内偏，再往后靠着椅背坐（backward pitch）并轻微侧倾（roll），呈放松斜靠姿态。
 const RIDERS = [
-  {kind:'mallow', x: 0.36, y:0.72, z:0.30, yaw: -0.30, scale:2.2},
-  {kind:'bunny',  x:-0.36, y:0.50, z:0.30, yaw:  0.30, scale:1.7},
+  {kind:'mallow', x: 0.36, y:0.72, z:0.30, yaw: -0.30, lean:-0.34, roll: 0.16, scale:2.2},
+  {kind:'bunny',  x:-0.36, y:0.50, z:0.30, yaw:  0.30, lean:-0.34, roll:-0.16, scale:1.7},
 ];
 const RIDER_SCALE = 1.0;
 // 调试开关都走网址 hash，可以叠着用：#park-mark-ghost-xray
@@ -483,7 +483,10 @@ function addRiders(car){
     const fig = r.kind === 'bunny' ? makeBunny() : makeMallow();
     fig.scale.setScalar(r.scale || RIDER_SCALE);
     fig.position.set(r.x, r.y, r.z);
+    fig.rotation.order = 'YXZ';
     fig.rotation.y = r.yaw;
+    fig.rotation.x = r.lean || 0;
+    fig.rotation.z = r.roll || 0;
     if(GHOST_RIDERS) fig.traverse(o => { if(o.isMesh){ o.material.depthTest = false; o.renderOrder = 8; } });
     fig.traverse(o => { if(o.isMesh) o.userData.rider = r.kind; });
     car.add(fig);
