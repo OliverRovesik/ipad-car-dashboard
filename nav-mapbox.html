@@ -321,10 +321,14 @@ function lsSet(v){ memTok=v; try{ v?localStorage.setItem(TK,v):localStorage.remo
 function lsGet(){ try{ return localStorage.getItem(TK)||memTok; }catch(e){ return memTok; } }
 // change 只在失焦时才触发，而 iPad 上直接点 Go 常常是按钮先跑、输入框还没失焦 ——
 // 所以读 token 时必须把输入框里现成的值也算上，否则会报"还没填 token"但其实填了。
-function tokOf(){ return lsGet() || ($('#tok')?$('#tok').value.trim():''); }
-// 公开 token 一定是 pk. 开头。不校验的话，粘错一段话也会照存不误，
-// 之后地图只是静默空白 + "token rejected"，在 iPad 上根本无从下手。
 function okTok(v){ return /^pk\.[A-Za-z0-9_-]{20,}/.test(v); }
+// tokOf 是所有请求的凭证出口，所以它只认过了校验的值：
+// 存进去一段话时，它必须等于"没有 token"，否则页面会拿这段话去 new Map()，
+// 换来一次 401 和一个永远加载不完、又永远不会重建的地图。
+function tokOf(){
+  const v=lsGet() || ($('#tok')?$('#tok').value.trim():'');
+  return okTok(v) ? v : '';
+}
 function adoptToken(){
   const v=$('#tok').value.trim();
   if(!v) return tokOf();
@@ -332,12 +336,12 @@ function adoptToken(){
   lsSet(v); $('#tok').value=''; tkState(); return v;
 }
 function tkState(){
-  const t=tokOf(), el=$('#tkState');
+  const raw=lsGet(), t=tokOf(), el=$('#tkState');
   $('#tok').style.display = t ? 'none' : '';
-  el.classList.toggle('bad', !!t && !okTok(t));
-  el.textContent = !t ? 'no token = demo grid'
-    : okTok(t) ? `token …${t.slice(-4)} · tap to change`
-    : `not a pk. token (…${t.slice(-4)}) · tap to change`;
+  el.classList.toggle('bad', !t && !!raw);
+  el.textContent = t ? `token …${t.slice(-4)} · tap to change`
+    : raw ? `not a pk. token (…${raw.slice(-4)}) · tap to change`
+    : 'no token = demo grid';
 }
 // 只存这台设备：改完或回车即保存，存好之后这一行自己收起
 $('#tok').addEventListener('change',e=>{
@@ -567,7 +571,7 @@ function carZoomExpr(axis){ const st=[];
   for(let z=13;z<=21;z++){ const s=carScaleAt(z);
     st.push(z,['literal', axis==='scale'?[s,s,s]:[0,0,CAR.minY*s]]); }
   return ['interpolate',['linear'],['zoom'],...st]; }
-let gl=null, glReady=false, carMk=null, carEl=null, carModelOk=false, follow=true, resumeT=null, etaT=null;
+let gl=null, glReady=false, glTok='', carMk=null, carEl=null, carModelOk=false, follow=true, resumeT=null, etaT=null;
 function setFollow(on){
   follow=on;
   const b=$('#bFollow'); b.classList.toggle('on',on);
@@ -588,13 +592,19 @@ function useDot(why,quiet){
   if(!quiet) toast('Car model not visible — using a position dot (see ?debug=1)');
 }
 function initGL(){
-  if(gl){ glReady=true; drawGL(); return true; }   // 已存在也必须重画，否则换目的地路线不更新
+  if(gl){
+    // accessToken 只在 new Map() 那一刻读一次：换了 token 之后这个旧 Map
+    // 带着旧凭证、load 事件永远不会再来的，只能重建，不能假装它准备好了。
+    if(glTok!==tokOf()){ gl.remove(); gl=null; glReady=false; carModelOk=false; carMk=null; carEl=null; }
+    else if(gl.getSource('route')){ glReady=true; drawGL(); return true; }   // 已存在也必须重画，否则换目的地路线不更新
+    else return true;                    // 还在加载：load 事件里会自己 startNav()
+  }
   if(!window.mapboxgl){ toast('mapbox-gl.js did not load'); return false; }
   if(!adoptToken()){ toast('Enter a Mapbox public token — it starts with "pk."'); return false; }
   // 顺序很关键：先让容器有尺寸，再 new Map()。反过来做的话 Mapbox 按 0×0 算出 canvas，
   // 结果就是地图只占左上角一小块且不会自己长大。
   $('#glmap').style.display='block'; $('#sketch').style.display='none'; $('#mapImg').style.display='none';
-  mapboxgl.accessToken=tokOf();
+  mapboxgl.accessToken=tokOf(); glTok=mapboxgl.accessToken;
   gl=new mapboxgl.Map({container:'glmap', style:'mapbox://styles/mapbox/streets-v12',
     center:S.pos||FALLBACK, zoom:DRIVE.zoom, pitch:DRIVE.pitch,
     cooperativeGestures:false,                      // 车机是触屏：单指拖动、双指缩放才符合直觉
