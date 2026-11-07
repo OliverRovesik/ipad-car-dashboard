@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
-<title>Fiesta · 驾驶可视化（GPS 版）</title>
+<title>Fiesta · Drive Display (GPS)</title>
 <!--
   本版数据源是 GPS，不是 OBD：转速/水温/电压/节气门/故障灯一律不显示，
   因为 GPS 拿不到这些，伪造它们比不显示更糟。
@@ -29,53 +29,69 @@
   #scene canvas{display:block;touch-action:none}
 
   .ov{position:fixed;z-index:3}
+  /* 顶部三个区块放进一条 flex 行：绝对定位的三块在窄窗口下必然互相重叠 */
+  #topbar{left:clamp(12px,1.6vw,26px);right:clamp(12px,1.6vw,26px);top:clamp(10px,1.6vh,20px);
+    display:flex;align-items:flex-start;align-content:flex-start;justify-content:space-between;
+    flex-wrap:wrap;gap:clamp(8px,1.2vw,18px)}
+  #topbar .ov{position:static;z-index:auto}
+  #topbar span, #topbar b, #topbar .lamp, #clockwx{white-space:nowrap}
 
   /* 左上：档位 + 车速 */
-  #topleft{left:26px;top:20px;display:flex;flex-direction:column;gap:2px}
-  #gearrow{display:flex;gap:16px;font-size:21px;font-weight:600;color:var(--sub);letter-spacing:.02em}
+  #topleft{display:flex;flex-direction:column;gap:2px;flex:0 0 auto}
+  #gearrow{display:flex;gap:clamp(9px,1.2vw,16px);font-size:clamp(15px,1.7vw,21px);
+    font-weight:600;color:var(--sub);letter-spacing:.02em}
   #gearrow .dim{opacity:.35}
   #ready{margin-left:6px;font-size:14px;font-weight:700;letter-spacing:.14em;color:var(--green);
     align-self:center}
   #ready.off{color:var(--sub)}
-  #speed{font-size:104px;font-weight:300;line-height:.86;letter-spacing:-.04em;
-    font-variant-numeric:tabular-nums}
+  #speed{font-size:clamp(52px,7.6vw,104px);font-weight:300;line-height:.86;
+    letter-spacing:-.04em;font-variant-numeric:tabular-nums}
   #speedunit{font-size:17px;color:var(--sub);font-weight:600;margin-top:2px}
 
   /* 左侧告警灯 */
-  #rail{left:28px;top:238px;display:flex;flex-direction:column;gap:13px}
-  .lamp{display:flex;align-items:center;gap:9px;font-size:13.5px;color:var(--sub);font-weight:600}
+  #rail{display:flex;flex-direction:column;gap:clamp(6px,1.2vh,13px);
+    margin-top:clamp(10px,2.4vh,28px)}
+  .lamp{display:flex;align-items:center;gap:9px;font-size:clamp(11px,1.15vw,13.5px);
+    color:var(--sub);font-weight:600}
   .lamp svg{width:26px;height:20px;stroke:currentColor;fill:none;stroke-width:1.8}
   .lamp.bad{color:var(--red)}
 
   /* 右上：OBD 读数 */
-  #obd{right:24px;top:20px;display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end;max-width:46vw}
+  #obd{display:flex;gap:clamp(6px,.8vw,10px);flex-wrap:wrap;justify-content:flex-end;
+    flex:1 1 auto}
   .card{background:var(--card);backdrop-filter:blur(14px);border:1px solid var(--line);
-    border-radius:15px;padding:8px 12px;min-width:82px;text-align:right}
+    border-radius:clamp(10px,1.2vw,15px);padding:clamp(5px,.9vh,9px) clamp(8px,1vw,15px);
+    min-width:clamp(62px,7.4vw,96px);text-align:right}
   .card span{display:block;font-size:10.5px;letter-spacing:.11em;text-transform:uppercase;
     color:var(--sub);font-weight:700}
-  .card b{display:block;font-size:26px;font-weight:600;font-variant-numeric:tabular-nums;line-height:1.15}
+  .card b{display:block;font-size:clamp(17px,2.1vw,26px);font-weight:600;
+    font-variant-numeric:tabular-nums;line-height:1.15}
   .card.warn b{color:var(--amber)} .card.bad b{color:var(--red)}
 
   /* 右下：里程 */
-  #trip{right:24px;bottom:112px;text-align:right;cursor:pointer}
+  #trip{right:clamp(14px,2vw,24px);bottom:clamp(56px,14vh,112px);text-align:right;cursor:pointer}
   #trip span{font-size:11px;letter-spacing:.12em;color:var(--sub);font-weight:700;text-transform:uppercase}
   #trip b{display:block;font-size:34px;font-weight:600;font-variant-numeric:tabular-nums}
   #trip small{font-size:13px;color:var(--sub);font-weight:600}
 
   /* 底部状态 */
   /* 顶部中央：日期 / 时间 / 天气 */
-  #clockwx{left:50%;top:20px;transform:translateX(-50%);display:flex;align-items:center;gap:14px;
+  #clockwx{display:flex;align-items:center;gap:clamp(8px,1vw,14px);
     background:var(--card);backdrop-filter:blur(14px);border:1px solid var(--line);
-    border-radius:16px;padding:8px 18px;max-width:32vw;overflow:hidden}
-  #clkTime{font-size:26px;font-weight:600;font-variant-numeric:tabular-nums;letter-spacing:.01em}
-  #clkDate{font-size:12.5px;color:var(--sub);font-weight:600}
-  #wx{font-size:15px;font-weight:600;color:var(--sub);border-left:1px solid var(--line);
-    padding-left:14px;min-width:5.5em}
+    border-radius:16px;padding:clamp(5px,.9vh,8px) clamp(10px,1.4vw,18px);
+    flex:0 0 auto}
+  #clkTime{font-size:clamp(18px,2.1vw,26px);font-weight:600;
+    font-variant-numeric:tabular-nums}
+  #clkDate{font-size:clamp(10px,1.1vw,12.5px);color:var(--sub);font-weight:600}
+  #wx{font-size:clamp(11px,1.3vw,15px);font-weight:600;color:var(--sub);
+    border-left:1px solid var(--line);padding-left:clamp(8px,1vw,14px)}
   #wx.bad{color:var(--amber)}
-  #hint{left:50%;bottom:74px;transform:translateX(-50%);transition:opacity .5s}
+  #hint{left:50%;bottom:calc(clamp(12px,2.4vh,18px) + 46px);transform:translateX(-50%);transition:opacity .5s}
   #hint.gone{opacity:0}
 
-  #note{left:26px;bottom:18px;display:flex;gap:10px;align-items:center}
+  #note{left:clamp(12px,1.6vw,26px);bottom:clamp(12px,2.4vh,18px);display:flex;
+    gap:clamp(6px,.8vw,10px);align-items:center;flex-wrap:wrap}
+  #note .chip{white-space:nowrap}
   .chip{background:var(--card);backdrop-filter:blur(14px);border:1px solid var(--line);
     border-radius:20px;padding:6px 13px;font-size:12.5px;font-weight:600;color:var(--sub);
     display:flex;align-items:center;gap:7px}
@@ -105,25 +121,19 @@
 <body>
 <div id="scene"></div>
 
-<div class="ov" id="topleft">
+<div class="ov" id="topbar">
+  <div class="ov" id="topleft">
   <div id="gearrow"><i data-g="P" class="dim">P</i><i data-g="R" class="dim">R</i>
     <i data-g="N">N</i><i data-g="D" class="dim">D</i><span id="ready">READY</span></div>
   <div id="speed">0</div>
   <div id="speedunit">km/h</div>
-</div>
-
 <div class="ov" id="rail">
-  <div class="lamp" id="lampFix"><svg viewBox="0 0 30 20"><path d="M15 3v14M8 9l7-6 7 6"/><circle cx="15" cy="17" r="2"/></svg>等待定位</div>
-  <div class="lamp" id="lampAcc"><svg viewBox="0 0 30 20"><circle cx="15" cy="10" r="6"/><path d="M15 16v4M9 10H5M21 10h4"/></svg>精度未知</div>
-  <div class="lamp" id="lampSrc"><svg viewBox="0 0 30 20"><path d="M4 16h6l4-8 4 8h8"/></svg>速度来源 —</div>
+  <div class="lamp" id="lampFix"><svg viewBox="0 0 30 20"><path d="M15 3v14M8 9l7-6 7 6"/><circle cx="15" cy="17" r="2"/></svg>No fix</div>
+  <div class="lamp" id="lampAcc"><svg viewBox="0 0 30 20"><circle cx="15" cy="10" r="6"/><path d="M15 16v4M9 10H5M21 10h4"/></svg>Accuracy unknown</div>
+  <div class="lamp" id="lampSrc"><svg viewBox="0 0 30 20"><path d="M4 16h6l4-8 4 8h8"/></svg>Speed source —</div>
+</div>
 </div>
 
-<div class="ov" id="obd">
-  <div class="card" id="cAcc"><span>加速度</span><b id="vAcc">—</b></div>
-  <div class="card" id="cAvg"><span>平均车速</span><b id="vAvg">—</b></div>
-  <div class="card" id="cPrec"><span>定位精度</span><b id="vPrec">—</b></div>
-  <div class="card" id="cHead"><span>航向</span><b id="vHead">—</b></div>
-</div>
 
 <div class="ov" id="clockwx">
   <div><div id="clkTime">--:--</div></div>
@@ -131,17 +141,25 @@
   <div id="wx">—</div>
 </div>
 
-<div class="ov chip" id="hint">← 拖动可绕车查看 →</div>
-
-<div class="ov" id="trip"><span>Trip</span><b id="vTrip">0.0</b><small>km · 点按清零</small></div>
-
-<div class="ov" id="note">
-  <div class="chip"><i class="dot off" id="dot"></i><span id="conn">OBD 未连接</span></div>
-  <div class="chip sim hidden" id="wlwarn" style="color:#7a2a1a;background:rgba(255,170,140,.75);border-color:rgba(200,90,40,.4)"></div>
-  <div class="chip sim">道路画面为动画 · 非实景</div>
+<div class="ov" id="obd">
+  <div class="card" id="cAcc"><span>Accel</span><b id="vAcc">—</b></div>
+  <div class="card" id="cAvg"><span>Avg speed</span><b id="vAvg">—</b></div>
+  <div class="card" id="cPrec"><span>Accuracy</span><b id="vPrec">—</b></div>
+  <div class="card" id="cHead"><span>Heading</span><b id="vHead">—</b></div>
+</div>
 </div>
 
-<div class="ov" id="load">正在加载车辆模型…</div>
+<div class="ov chip" id="hint">← Drag to orbit the car →</div>
+
+<div class="ov" id="trip"><span>Trip</span><b id="vTrip">0.0</b><small>km · tap to reset</small></div>
+
+<div class="ov" id="note">
+  <div class="chip"><i class="dot off" id="dot"></i><span id="conn">Waiting for GPS</span></div>
+  <div class="chip sim hidden" id="wlwarn" style="color:#7a2a1a;background:rgba(255,170,140,.75);border-color:rgba(200,90,40,.4)"></div>
+  <div class="chip sim">Animated road · not a live view</div>
+</div>
+
+<div class="ov" id="load">Loading vehicle model…</div>
 
 <script src="vendor/three.min.js"></script>
 <script src="vendor/GLTFLoader.js"></script>
@@ -180,7 +198,7 @@ try{
   document.getElementById('scene').appendChild(renderer.domElement);
 }catch(e){
   const el=document.getElementById('load');
-  el.className='bad'; el.textContent='这台设备起不了 WebGL：'+e.message; throw e;
+  el.className='bad'; el.textContent='WebGL unavailable on this device: '+e.message; throw e;
 }
 
 scene = new THREE.Scene();
@@ -590,11 +608,11 @@ new THREE.GLTFLoader().load(modelURL(), g => {
 
   applyTheme();                      // 模型是异步来的，首帧那次 applyTheme 里还没有尾灯材质
   document.getElementById('load').className = 'hidden';
-  console.info('Fiesta 就绪：' + size.z.toFixed(2) + 'm 长 × ' + size.x.toFixed(2) + 'm 宽 × ' + size.y.toFixed(2) + 'm 高，尾灯发光材质 ' + tailMats.length + ' 个');
+  console.info('Fiesta ready:' + size.z.toFixed(2) + 'm long × ' + size.x.toFixed(2) + 'm wide × ' + size.y.toFixed(2) + 'm tall, tail-light materials: ' + tailMats.length + '');
 }, undefined,
 e => {
   const el=document.getElementById('load');
-  el.className='bad'; el.textContent='模型加载失败：'+(e && e.message || e);
+  el.className='bad'; el.textContent='Model failed to load:'+(e && e.message || e);
 });
 
 /* ---------- 昼夜主题 ---------- */
@@ -649,7 +667,7 @@ function updateFade(){
 /* ---------- 读数 ---------- */
 let tripKm = 0, lastTs = 0, wasDark = null;
 document.getElementById('trip').onclick = ()=>{ tripKm = 0; };
-const COMPASS = ['北','东北','东','东南','南','西南','西','西北'];
+const COMPASS = ['N','NE','E','SE','S','SW','W','NW'];
 function paint(){
   document.getElementById('speed').textContent = Math.round(shown.speed);
   document.getElementById('vTrip').textContent = tripKm.toFixed(1);
@@ -669,12 +687,12 @@ function paint(){
   document.getElementById('ready').textContent = D.connected?'READY':'OFF';
   document.getElementById('ready').className   = D.connected?'':'off';
   document.getElementById('dot').className     = 'dot '+(D.connected?'on':'off');
-  document.getElementById('conn').textContent  = D.connected?GPS_LABEL:'GPS 未定位';
+  document.getElementById('conn').textContent  = D.connected?GPS_LABEL:'Waiting for GPS';
   document.getElementById('lampFix').className = 'lamp'+(D.connected?' on':' bad');
-  document.getElementById('lampFix').lastChild.textContent = D.connected?'已定位':'等待定位';
+  document.getElementById('lampFix').lastChild.textContent = D.connected?'Position fixed':'No fix yet';
   document.getElementById('lampAcc').className = 'lamp'+(acc===null?'':acc>30?' bad':' on');
-  document.getElementById('lampAcc').lastChild.textContent = '精度 '+(acc===null?'未知':acc.toFixed(0)+'m');
-  document.getElementById('lampSrc').lastChild.textContent = '速度来源 '+G.src;
+  document.getElementById('lampAcc').lastChild.textContent = 'Accuracy '+(acc===null?'n/a':acc.toFixed(0)+'m');
+  document.getElementById('lampSrc').lastChild.textContent = 'Speed source '+G.src;
 }
 
 function loop(ts){
@@ -727,7 +745,7 @@ function renderFrame(){
 /* ---------- GPS 数据源 ---------- */
 // GPS 能给的：速度、位置、精度、航向、高度。
 // GPS 给不了的（转速/水温/电压/节气门/故障灯）本版一律不显示。
-let GPS_LABEL = 'GPS 已定位', demoGps = true;
+let GPS_LABEL = 'GPS locked';
 const R_E = 6371000;
 function hav(lat1, lon1, lat2, lon2){                 // 大圆距离(米)
   const r = Math.PI/180;
@@ -748,8 +766,8 @@ function ingest(lat, lon, speedMs, acc, head, ts){
     if(v === null && dt > 0.25 && d < 400) v = d/dt*3.6;
     if(d > 1.5 && d < 300) tripKm += d/1000;          // 丢掉抖动和跳点再计入里程
   }
-  if(v === null){ v = D.speed; G.src = '无速度'; }
-  else G.src = speedMs==null ? '位移推算' : 'GPS 速度';
+  if(v === null){ v = D.speed; G.src = 'no speed'; }
+  else G.src = speedMs==null ? 'from position' : 'GPS speed';
   D.speed = Math.max(0, Math.min(220, v));
   G.lat = lat; G.lon = lon; G.posTs = ts;
   if(!D.connected){ D.connected = true; refreshWeather(); }   // 第一个定位点一到就刷新天气
@@ -760,24 +778,30 @@ function ingest(lat, lon, speedMs, acc, head, ts){
 let watchId = null;
 function startRealGps(){
   if(!navigator.geolocation) return false;
-  GPS_LABEL = 'GPS 已定位';
+  GPS_LABEL = 'GPS fix locked';
   watchId = navigator.geolocation.watchPosition(p=>{
+    if(!hasFix){ hasFix = true; if(demoTimer){ clearInterval(demoTimer); demoTimer = null; } }
+    GPS_LABEL = 'GPS fix locked';
     const c = p.coords;
     ingest(c.latitude, c.longitude, c.speed, c.accuracy,
            c.heading===undefined?null:c.heading, p.timestamp||performance.now());
-  }, ()=>{ D.connected = false; }, { enableHighAccuracy:true, maximumAge:0, timeout:20000 });
+  }, ()=>{ D.connected = false; if(!hasFix) startDemo(); },
+     { enableHighAccuracy:true, maximumAge:0, timeout:20000 });
   return true;
 }
 
 /* 演示：按 1Hz 生成定位点（真实 GPS 的更新率就是这个量级），
-   静止时 speed 给 null，逼出位移推算那条路。 */
-(function demoGps(){
-  if(!demoGps) return;
-  GPS_LABEL = '演示轨迹（模拟 GPS）';
+   静止时 speed 给 null，逼出位移推算那条路。
+   只在真实定位不可用时才跑；第一个真实定位点一到就永久停掉，
+   否则演示航迹会和真 GPS 挤在同一条 1Hz 序列里，车速来回跳。 */
+let hasFix = false, demoTimer = null;
+function startDemo(){
+  if(demoTimer) return;
+  GPS_LABEL = 'Demo track (simulated GPS)';
   const cycle=[0,8,14,22,38,52,64,78,88,96,88,72,55,38,24,12,0];
   const PARKED=6;                                      // 前几拍静止：展示环绕视角与起步转场
   let n=0, lat=14.5995, lon=121.0210, hdg=35;
-  setInterval(()=>{
+  demoTimer = setInterval(()=>{
     const f=((n++)%40)/40*cycle.length, i=Math.floor(f), k=f-i;
     const s = n < PARKED ? 0 : cycle[i]+(cycle[(i+1)%cycle.length]-cycle[i])*k;
     const ms = s/3.6, dtSec = 1;
@@ -787,8 +811,8 @@ function startRealGps(){
     lon += (d*Math.sin(hdg*Math.PI/180))/(111320*Math.cos(lat*Math.PI/180));
     ingest(lat, lon, n<PARKED ? null : ms, 6 + (n%3)*3, hdg, performance.now());
   }, 1000);
-})();
-if(!startRealGps()) demoGps = true;                     // 没有 geolocation 就留在演示
+}
+if(!startRealGps()) startDemo();                        // 没有 geolocation 就直接进演示
 
 /* ---------- 日期 / 时间 / 天气 ---------- */
 let wxLast = null;
@@ -797,14 +821,15 @@ function tickClock(){
   document.getElementById('clkTime').textContent =
     String(n.getHours()).padStart(2,'0') + ':' + String(n.getMinutes()).padStart(2,'0');
   document.getElementById('clkDate').textContent =
-    n.toLocaleDateString('zh-CN', { month:'long', day:'numeric', weekday:'long' });
+    n.toLocaleDateString('en-GB', { weekday:'short', day:'numeric', month:'short' });
 }
 tickClock(); setInterval(tickClock, 15000);
 
-const WMO = { 0:'晴', 1:'大致晴', 2:'局部多云', 3:'阴', 45:'雾', 48:'雾凇', 51:'毛毛雨', 53:'毛毛雨',
-  55:'冻毛毛雨', 61:'小雨', 63:'中雨', 65:'大雨', 66:'冻雨', 67:'强冻雨', 71:'小雪', 73:'中雪',
-  75:'大雪', 77:'米雪', 80:'阵雨', 81:'强阵雨', 82:'暴雨', 85:'阵雪', 86:'强阵雪',
-  95:'雷暴', 96:'雷暴伴冰雹', 99:'强雷暴伴冰雹' };
+const WMO = { 0:'Clear', 1:'Mostly clear', 2:'Partly cloudy', 3:'Overcast', 45:'Fog', 48:'Rime fog',
+  51:'Drizzle', 53:'Drizzle', 55:'Freezing drizzle', 61:'Light rain', 63:'Rain', 65:'Heavy rain',
+  66:'Freezing rain', 67:'Heavy freezing rain', 71:'Light snow', 73:'Snow', 75:'Heavy snow',
+  77:'Snow grains', 80:'Showers', 81:'Showers', 82:'Violent showers', 85:'Snow showers',
+  86:'Snow showers', 95:'Thunderstorm', 96:'Thunderstorm + hail', 99:'Severe thunderstorm + hail' };
 // 定位失败/被拒时的兜底：用户在马尼拉
 const FALLBACK = { lat:14.5995, lon:120.9842 };
 const wxEl = document.getElementById('wx');
@@ -818,7 +843,7 @@ function loadWeather(lat, lon){
       wxEl.textContent = Math.round(c.temperature_2m) + '° ' + (WMO[c.weather_code] || '');
       wxEl.className = '';
     })
-    .catch(() => { wxEl.textContent = '天气不可用'; wxEl.className = 'bad'; });
+    .catch(() => { wxEl.textContent = 'Weather n/a'; wxEl.className = 'bad'; });
 }
 // GPS 版：位置由上面的 watchPosition 提供，避免重复申请定位权限
 function refreshWeather(){
@@ -833,12 +858,12 @@ setInterval(refreshWeather, 15 * 60 * 1000);
 // 只在"拿不到"的时候才提示，正常情况不打扰。
 let wl = null;
 async function keepAwake(){
-  if(!navigator.wakeLock){ showWlWarn('这台设备/浏览器不支持 Wake Lock'); return; }
+  if(!navigator.wakeLock){ showWlWarn('Wake Lock not supported here'); return; }
   try{
     wl = await navigator.wakeLock.request('screen');
     document.getElementById('wlwarn').classList.add('hidden');
     wl.addEventListener('release', () => { wl = null; });
-  }catch(e){ wl = null; showWlWarn('屏幕常亮被拒绝：' + e.message); }
+  }catch(e){ wl = null; showWlWarn('Wake Lock denied:' + e.message); }
 }
 function showWlWarn(msg){
   const el = document.getElementById('wlwarn');
