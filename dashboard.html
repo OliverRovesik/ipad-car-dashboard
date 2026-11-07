@@ -1,0 +1,492 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<title>Fiesta · 驾驶可视化</title>
+<!--
+  三维依赖与素材
+  - three.min.js / GLTFLoader.js  r128, MIT (c) 2010-2021 three.js authors，本地副本，无 CDN 依赖
+  - model/fiesta.glb  "2013 Ford Fiesta ST" by Ddiaz Design, https://sketchfab.com/ddiaz-design
+    授权 CC-BY-NC-SA-4.0 —— 署名 + 非商业 + 相同方式共享。再分发时须保留本注释。
+-->
+<style>
+  :root{
+    --bg:#eef1f5; --ink:#0d1319; --sub:#68727f; --card:rgba(255,255,255,.82);
+    --line:rgba(120,132,148,.28); --green:#12a15c; --amber:#c98a00; --red:#d92d20;
+  }
+  *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+  html,body{height:100%;overflow:hidden;background:var(--bg)}
+  body{font:15px/1.35 -apple-system,"SF Pro Display",system-ui,sans-serif;color:var(--ink);
+    -webkit-font-smoothing:antialiased}
+  #scene{position:fixed;inset:0}
+  #scene canvas{display:block}
+
+  .ov{position:fixed;z-index:3}
+
+  /* 左上：档位 + 车速 */
+  #topleft{left:26px;top:20px;display:flex;flex-direction:column;gap:2px}
+  #gearrow{display:flex;gap:16px;font-size:21px;font-weight:600;color:var(--sub);letter-spacing:.02em}
+  #gearrow .dim{opacity:.35}
+  #ready{margin-left:6px;font-size:14px;font-weight:700;letter-spacing:.14em;color:var(--green);
+    align-self:center}
+  #ready.off{color:var(--sub)}
+  #speed{font-size:104px;font-weight:300;line-height:.86;letter-spacing:-.04em;
+    font-variant-numeric:tabular-nums}
+  #speedunit{font-size:17px;color:var(--sub);font-weight:600;margin-top:2px}
+
+  /* 左侧告警灯 */
+  #rail{left:28px;top:238px;display:flex;flex-direction:column;gap:13px}
+  .lamp{display:flex;align-items:center;gap:9px;font-size:13.5px;color:var(--sub);font-weight:600}
+  .lamp svg{width:26px;height:20px;stroke:currentColor;fill:none;stroke-width:1.8}
+  .lamp.bad{color:var(--red)}
+
+  /* 右上：OBD 读数 */
+  #obd{right:24px;top:20px;display:flex;gap:10px;flex-wrap:wrap;justify-content:flex-end;max-width:62vw}
+  .card{background:var(--card);backdrop-filter:blur(14px);border:1px solid var(--line);
+    border-radius:15px;padding:9px 15px;min-width:96px;text-align:right}
+  .card span{display:block;font-size:10.5px;letter-spacing:.11em;text-transform:uppercase;
+    color:var(--sub);font-weight:700}
+  .card b{display:block;font-size:26px;font-weight:600;font-variant-numeric:tabular-nums;line-height:1.15}
+  .card.warn b{color:var(--amber)} .card.bad b{color:var(--red)}
+
+  /* 右下：里程 */
+  #trip{right:24px;bottom:112px;text-align:right;cursor:pointer}
+  #trip span{font-size:11px;letter-spacing:.12em;color:var(--sub);font-weight:700;text-transform:uppercase}
+  #trip b{display:block;font-size:34px;font-weight:600;font-variant-numeric:tabular-nums}
+  #trip small{font-size:13px;color:var(--sub);font-weight:600}
+
+  /* 底部状态 */
+  #note{left:26px;bottom:18px;display:flex;gap:10px;align-items:center}
+  .chip{background:var(--card);backdrop-filter:blur(14px);border:1px solid var(--line);
+    border-radius:20px;padding:6px 13px;font-size:12.5px;font-weight:600;color:var(--sub);
+    display:flex;align-items:center;gap:7px}
+  .chip.sim{color:#8a5a00;background:rgba(255,224,150,.72);border-color:rgba(200,150,20,.35)}
+  .dot{width:8px;height:8px;border-radius:50%;background:var(--sub)}
+  .dot.on{background:var(--green);box-shadow:0 0 0 3px rgba(18,161,92,.18)}
+  .dot.off{background:var(--red)}
+
+  #load{left:50%;top:50%;transform:translate(-50%,-50%);font-size:14px;font-weight:600;
+    color:var(--sub);background:var(--card);border:1px solid var(--line);border-radius:14px;
+    padding:12px 20px}
+  #load.bad{color:var(--red)}
+  #load.hidden{display:none}
+
+  /* iPad 开夜间模式时整屏跟着变暗 */
+  @media (prefers-color-scheme: dark){
+    :root{
+      --bg:#0e1216; --ink:#eef2f7; --sub:#8b98a8; --card:rgba(22,28,36,.82);
+      --line:rgba(150,165,185,.2); --green:#2fd07d; --amber:#f0b429; --red:#ff5c5c;
+    }
+    .chip.sim{color:#f0c060;background:rgba(120,86,10,.5);border-color:rgba(200,150,20,.3)}
+  }
+</style>
+</head>
+<body>
+<div id="scene"></div>
+
+<div class="ov" id="topleft">
+  <div id="gearrow"><i data-g="P" class="dim">P</i><i data-g="R" class="dim">R</i>
+    <i data-g="N">N</i><i data-g="D" class="dim">D</i><span id="ready">READY</span></div>
+  <div id="speed">0</div>
+  <div id="speedunit">km/h</div>
+</div>
+
+<div class="ov" id="rail">
+  <div class="lamp" id="lampMIL"><svg viewBox="0 0 30 20"><path d="M4 14h22v-4l-3-3-2 2-3-3H9l-2 2-3-1z"/><circle cx="11" cy="12" r="1.4"/></svg>发动机故障</div>
+  <div class="lamp" id="lampVolt"><svg viewBox="0 0 30 20"><rect x="4" y="6" width="22" height="11" rx="2"/><path d="M9 6V4h5v2M17 6V4h5v2"/><path d="M13 9l-2 4h3l-1 3"/></svg>电瓶电压</div>
+  <div class="lamp" id="lampTemp"><svg viewBox="0 0 30 20"><path d="M12 12V5a3 3 0 016 0v7a5 5 0 11-6 0z"/><circle cx="15" cy="15" r="2"/></svg>水温过高</div>
+</div>
+
+<div class="ov" id="obd">
+  <div class="card" id="cRpm"><span>转速</span><b id="vRpm">—</b></div>
+  <div class="card" id="cTemp"><span>水温</span><b id="vTemp">—</b></div>
+  <div class="card" id="cVolt"><span>电压</span><b id="vVolt">—</b></div>
+  <div class="card" id="cThr"><span>节气门</span><b id="vThr">—</b></div>
+</div>
+
+<div class="ov" id="trip"><span>Trip</span><b id="vTrip">0.0</b><small>km · 点按清零</small></div>
+
+<div class="ov" id="note">
+  <div class="chip"><i class="dot off" id="dot"></i><span id="conn">OBD 未连接</span></div>
+  <div class="chip sim">道路画面为动画 · 非实景</div>
+</div>
+
+<div class="ov" id="load">正在加载车辆模型…</div>
+
+<script src="vendor/three.min.js"></script>
+<script src="vendor/GLTFLoader.js"></script>
+<script src="model/fiesta.data.js"></script>
+<script>
+/* 数据接口：真实 ELM327 接进来时只喂这个对象。
+   {speed, rpm, coolant, volts, throttle, connected, mil}
+   手动挡没有档位/倒挡 PID，所以 P R N D 行按 未连接/怠速/行驶 三态显示，R 常暗。 */
+const D = { speed:0, rpm:0, coolant:60, volts:12.4, throttle:0, connected:false, mil:false };
+const shown = { speed:0, rpm:0, coolant:60, volts:12.4, throttle:0 };
+
+/* ---------- 场景 ---------- */
+const Z_EGO = 3.2;                    // 车尾离相机的距离(米)
+const CAR_LEN = 3.97;                 // Fiesta ST 实车长度(米)，用来归一模型
+const LANE = 3.4, HALF = LANE*1.5;    // 三车道，路面半宽 5.1m
+// 模型车头朝向：导出时车头朝 -Z，跟车视角要看到车尾，所以翻 180°
+const CAR_YAW = Math.PI;
+
+// 昼夜两套场景配色。tail 是尾灯自发光强度：夜间亮，白天灭。
+const THEME = {
+  light:{ sky:0xeef1f5, road:0xccd3db, shoulder:0xcfd5dd, edge:0xb6bfca, dash:0x98a3b1,
+          hemi:0.95, sun:0.50, ground:0xb6bfc9, beam:0 },
+  dark: { sky:0x0e1216, road:0x1b2129, shoulder:0x151b22, edge:0x2a333f, dash:0x465262,
+          hemi:0.34, sun:0.24, ground:0x0c1014, beam:0.85 },
+};
+let tailMats = [], rearSign = 0, beams = [];
+const PAINT = 0x22579f;                // 车漆：原模型是近黑的深藏蓝(0,5,56)，这里浅一档；想再浅改这里
+
+let renderer, scene, camera, dashes = [];
+try{
+  renderer = new THREE.WebGLRenderer({ antialias:true, alpha:false });
+  renderer.setPixelRatio(Math.min(devicePixelRatio||1, 2));
+  renderer.outputEncoding = THREE.sRGBEncoding;
+  document.getElementById('scene').appendChild(renderer.domElement);
+}catch(e){
+  const el=document.getElementById('load');
+  el.className='bad'; el.textContent='这台设备起不了 WebGL：'+e.message; throw e;
+}
+
+scene = new THREE.Scene();
+scene.background = new THREE.Color(THEME.light.sky);
+scene.fog = new THREE.Fog(THEME.light.sky, 55, 240);   // 远处路面融进背景，替代地平线硬边
+
+camera = new THREE.PerspectiveCamera(58, 1, 0.1, 400);
+camera.position.set(0, 2.45, 0);
+camera.lookAt(0, 0.5, -10);
+
+const hemi = new THREE.HemisphereLight(0xffffff, 0xb6bfc9, 0.95);
+scene.add(hemi);
+const sun = new THREE.DirectionalLight(0xffffff, 0.5);
+sun.position.set(-3, 8, -6);
+scene.add(sun);
+
+const ground = {};
+function plane(key, w, l, x, z, color){
+  const m = new THREE.Mesh(new THREE.PlaneGeometry(w, l), new THREE.MeshBasicMaterial({ color }));
+  m.rotation.x = -Math.PI/2; m.position.set(x, 0, z);
+  scene.add(m); (ground[key] = ground[key] || []).push(m); return m;
+}
+plane('road',     HALF*2, 420,   0, -190, 0xccd3db);      // 路面
+plane('shoulder', 1.1, 420, -HALF-0.55, -190, 0xcfd5dd);  // 路肩
+plane('shoulder', 1.1, 420,  HALF+0.55, -190, 0xcfd5dd);
+plane('edge',     0.16, 420, -HALF+0.08, -190, 0xb6bfca); // 外边实线
+plane('edge',     0.16, 420,  HALF-0.08, -190, 0xb6bfca);
+
+// 车道虚线：每 7.5m 一段，随车速向相机方向回流
+const dashGeo = new THREE.PlaneGeometry(0.14, 2.6);
+const dashMat = new THREE.MeshBasicMaterial({ color:0x98a3b1 });
+for(const lx of [-LANE/2-0.05, LANE/2+0.05])
+  for(let i=0;i<44;i++){
+    const m = new THREE.Mesh(dashGeo, dashMat);
+    m.rotation.x = -Math.PI/2; m.position.set(lx, 0.005, 6 - i*7.5);
+    scene.add(m); dashes.push(m);
+  }
+
+/* ---------- 尾灯光晕 ---------- */
+// 灯罩上色不等于"亮"。真实尾灯看到的是光在往外散，所以用加性混合的柔光贴图
+// 叠在灯的位置上：夜间是常亮的微光，踩刹车时更亮、晕开得更大。
+function glowTexture(){
+  const cv = document.createElement('canvas'); cv.width = cv.height = 128;
+  const x = cv.getContext('2d');
+  const g = x.createRadialGradient(64, 64, 0, 64, 64, 64);
+  g.addColorStop(0,   'rgba(255,205,185,1)');     // 炽热灯芯
+  g.addColorStop(.18, 'rgba(255,96,66,.85)');
+  g.addColorStop(.45, 'rgba(226,36,24,.34)');
+  g.addColorStop(.75, 'rgba(190,10,10,.10)');
+  g.addColorStop(1,   'rgba(170,0,0,0)');
+  x.fillStyle = g; x.fillRect(0, 0, 128, 128);
+  return new THREE.CanvasTexture(cv);
+}
+const glowTex = glowTexture();
+function plateTexture(){                                   // 车牌灯：暖白、横向铺开
+  const cv = document.createElement('canvas'); cv.width = cv.height = 128;
+  const x = cv.getContext('2d');
+  x.save(); x.translate(64,64); x.scale(1, 0.5);
+  const g = x.createRadialGradient(0, 0, 0, 0, 0, 64);
+  g.addColorStop(0, 'rgba(255,246,222,.95)'); g.addColorStop(.45, 'rgba(255,238,200,.4)');
+  g.addColorStop(1, 'rgba(255,230,190,0)');
+  x.fillStyle = g; x.beginPath(); x.arc(0, 0, 64, 0, 7); x.fill(); x.restore();
+  return new THREE.CanvasTexture(cv);
+}
+const PLATE_TEX = plateTexture();
+let plateLamp = null;
+let brakeGlow = 0, tailSprites = [];
+
+// OBD-II 没有刹车踏板信号，只能由减速度推断。车速原始值本身是脉冲式跳动的
+// （ELM327 大约每 200ms 才回一次），直接求导会得到尖刺，所以先平滑车速再平滑加速度。
+let vSmooth = 0, vPrev = 0, aSmooth = 0;
+function updateBrake(dt){
+  if(dt <= 0) return;
+  vSmooth += (D.speed - vSmooth) * Math.min(1, dt * 4);
+  const a = (vSmooth - vPrev) / 3.6 / dt;              // m/s²
+  vPrev = vSmooth;
+  aSmooth += (a - aSmooth) * Math.min(1, dt * 3);
+  const want = aSmooth < -0.35 ? Math.min(1, -aSmooth / 2.2) : 0;
+  // 上得快、下得慢：接近真车踩住踏板时灯一直亮着，松开后渐灭
+  brakeGlow += (want - brakeGlow) * Math.min(1, dt * (want > brakeGlow ? 14 : 4));
+}
+function applyTailGlow(){
+  const base = mq.matches ? 0.42 : 0;                  // 夜间示廓常亮，白天只跟刹车
+  const k = Math.min(1, base + brakeGlow);
+  for(const sp of tailSprites){
+    sp.material.opacity = k > 0.02 ? 0.18 + 0.82 * k : 0;   // 白天没刹车 = 全灭
+    const sc = 0.62 + 0.5 * k;
+    sp.scale.set(sc, sc * 0.86, 1);
+  }
+  for(const m of tailMats) m.emissiveIntensity = 2.2 * k;
+  window.__lights = { brake:+brakeGlow.toFixed(2), a:+aSmooth.toFixed(2), k:+k.toFixed(2) };
+}
+
+/* ---------- 环境反射 ---------- */
+// 车漆上的"太阳"是反射出来的，不是贴上去的高光：画一张天光渐变 + 一个亮圆，
+// 走 PMREM 生成环境贴图，MeshStandardMaterial 自己会把太阳反到车顶。
+function skyTexture(){
+  const cv = document.createElement('canvas'); cv.width = 512; cv.height = 256;
+  const x = cv.getContext('2d');
+  const g = x.createLinearGradient(0, 0, 0, 256);
+  g.addColorStop(0, '#dfe8f2'); g.addColorStop(.40, '#c2d0e0');
+  g.addColorStop(.50, '#93a0ad'); g.addColorStop(1, '#242a31');
+  x.fillStyle = g; x.fillRect(0, 0, 512, 256);
+  const sun = x.createRadialGradient(150, 52, 0, 150, 52, 21);   // 小而亮 = 一道高光
+  sun.addColorStop(0, 'rgba(255,255,255,1)');
+  sun.addColorStop(.45, 'rgba(255,250,235,.75)');
+  sun.addColorStop(1, 'rgba(255,244,220,0)');
+  x.fillStyle = sun; x.beginPath(); x.arc(150, 52, 21, 0, 7); x.fill();
+  const t = new THREE.Texture(cv);
+  t.mapping = THREE.EquirectangularReflectionMapping; t.needsUpdate = true;
+  return t;
+}
+const pmrem = new THREE.PMREMGenerator(renderer);
+scene.environment = pmrem.fromEquirectangular(skyTexture()).texture;
+pmrem.dispose();
+const carMats = [];                      // 收集车身材质，昼夜调节反射强度
+
+/* ---------- 大灯光池 ---------- */
+// 相机在车后方，灯罩本身看不见；夜间"开大灯"能被看见的只有铺在路面上的光。
+function beamTexture(){
+  const cv = document.createElement('canvas'); cv.width = 64; cv.height = 256;
+  const x = cv.getContext('2d');
+  // 渐变末端(画布底部)对应贴近车头的一侧：实测反了会亮在远处
+  const g = x.createLinearGradient(0, 0, 0, 256);
+  g.addColorStop(0, 'rgba(255,247,222,0)');
+  g.addColorStop(.58, 'rgba(255,247,222,.34)');
+  g.addColorStop(1, 'rgba(255,247,222,.95)');
+  x.fillStyle = g; x.fillRect(0, 0, 64, 256);
+  const h = x.createLinearGradient(0, 0, 64, 0);           // 两侧羽化
+  h.addColorStop(0, 'rgba(0,0,0,.9)'); h.addColorStop(.5, 'rgba(0,0,0,0)'); h.addColorStop(1, 'rgba(0,0,0,.9)');
+  x.globalCompositeOperation = 'destination-out'; x.fillStyle = h; x.fillRect(0, 0, 64, 256);
+  return new THREE.CanvasTexture(cv);
+}
+const beamTex = beamTexture();
+for(const bx of [-0.55, 0.55]){
+  const b = new THREE.Mesh(new THREE.PlaneGeometry(1.6, 17),
+    new THREE.MeshBasicMaterial({ map:beamTex, transparent:true, opacity:0,
+                                  blending:THREE.AdditiveBlending, depthWrite:false, fog:false }));
+  b.rotation.x = -Math.PI/2;
+  b.position.set(bx, 0.02, -(Z_EGO + CAR_LEN + 8.5));      // 起点贴车头，往前 17m
+  scene.add(b); beams.push(b);
+}
+
+/* ---------- 车辆模型 ---------- */
+// 从内嵌 base64 构造 Blob URL，而不是 fetch .glb：file:// 下 XHR 取同目录文件会被拦
+function modelURL(){
+  const b64 = window.__FIESTA_GLB;
+  if(!b64) return null;
+  const bin = atob(b64), u8 = new Uint8Array(bin.length);
+  for(let i=0;i<bin.length;i++) u8[i] = bin.charCodeAt(i);
+  return URL.createObjectURL(new Blob([u8], { type:'model/gltf-binary' }));
+}
+
+new THREE.GLTFLoader().load(modelURL(), g => {
+  const obj = g.scene;
+  // 作者从 FBX 转出时留了 0.01 的节点缩放，实车 3.97m 会变成 4cm。
+  // 不写死倍率：按 Fiesta ST 真实车长把包围盒归一，作者用什么单位都能对上。
+  obj.updateMatrixWorld(true);
+  let box = new THREE.Box3().setFromObject(obj);
+  let size = box.getSize(new THREE.Vector3());
+  obj.scale.multiplyScalar(CAR_LEN / Math.max(size.x, size.z));
+  obj.updateMatrixWorld(true);
+  box = new THREE.Box3().setFromObject(obj);
+  size = box.getSize(new THREE.Vector3());
+  const ctr = box.getCenter(new THREE.Vector3());
+
+  // 尾灯：红色主导 + 位于车身两端（座椅也是红的，但在车厢中部，靠位置排除）。
+  // 只标记材质，强度交给 applyTheme，夜间才发光。
+  const halfLen = size.z/2; let tailBox = null;
+  const off = o => { const b = new THREE.Box3().setFromObject(o); return (b.min.z+b.max.z)/2 - ctr.z; };
+  // 灯罩材质是和别的部件共用的（红色尾灯材质 = 红色座椅，白色灯罩材质 = 车尾徽标）。
+  // 直接改材质会让座椅和徽标一起发光，所以只给命中的 mesh 换一份克隆材质。
+  function glowOn(o, m, hex){
+    const cm = m.clone();
+    cm.emissive = new THREE.Color(hex); cm.emissiveIntensity = 0;
+    const ms = [].concat(o.material); ms[ms.indexOf(m)] = cm;
+    o.material = ms.length === 1 ? cm : ms;
+    return cm;
+  }
+  // 车漆：原模型是近乎黑的深藏蓝(baseColorFactor 0,0.021,0.222)，调浅并压低粗糙度
+  // 让太阳反光拉得出来。同样只改克隆体，不动共享材质。
+  function lighten(o, m){
+    const cm = m.clone();
+    cm.color.setHex(PAINT); cm.roughness = Math.min(cm.roughness, 0.32);
+    cm.metalness = Math.max(cm.metalness, 0.62); cm.envMapIntensity = 0.7;
+    const ms = [].concat(o.material); ms[ms.indexOf(m)] = cm;
+    o.material = ms.length === 1 ? cm : ms;
+    return cm;
+  }
+  obj.traverse(o => {
+    if(!o.isMesh) return;
+    for(const m of [].concat(o.material)){
+      const c = m && m.color;
+      if(!c) continue;
+      if(c.b > 1.8*Math.max(c.r, c.g)){ carMats.push(lighten(o, m)); continue; }  // 蓝色主导 = 车漆
+      carMats.push(m);
+      if(!(c.r > 1.8*Math.max(c.g, c.b))) continue;
+      const z = off(o);
+      if(Math.abs(z) > halfLen*0.72){
+        tailMats.push(glowOn(o, m, 0xff2d1a)); rearSign = Math.sign(z);
+        tailBox = new THREE.Box3().setFromObject(o);          // 记住灯的实际位置
+      }
+    }
+  });
+  // 前大灯不做灯罩自发光：相机在车后方根本看不到灯罩，而灯罩材质和车尾徽标共用，
+  // 点亮它只会让徽标发白。夜间的"开大灯"由路面上的光池表达。
+
+  obj.position.set(-ctr.x, -box.min.y, -ctr.z);           // 居中 + 落地
+
+  const car = new THREE.Group(); car.add(obj);
+  if(tailBox){
+    const plateY = (tailBox.min.y + tailBox.max.y)/2 - 0.20 + obj.position.y;
+    const plate = new THREE.Sprite(new THREE.SpriteMaterial({ map: PLATE_TEX, transparent:true,
+      blending: THREE.AdditiveBlending, depthWrite:false, opacity:0 }));
+    plate.position.set(obj.position.x, plateY, tailBox.min.z + obj.position.z + 0.02);
+    plate.scale.set(0.62, 0.30, 1);
+    car.add(plate); plateLamp = plate;
+  }
+  if(tailBox){                                                 // 光晕贴在灯罩两端
+    const y = (tailBox.min.y + tailBox.max.y)/2 + obj.position.y;
+    for(const x of [tailBox.min.x, tailBox.max.x]){
+      const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTex, transparent:true,
+        blending: THREE.AdditiveBlending, depthWrite:false, opacity:0 }));
+      sp.position.set(x + obj.position.x, y, tailBox.min.z + obj.position.z);
+      car.add(sp); tailSprites.push(sp);
+    }
+  }
+  car.rotation.y = CAR_YAW;
+  car.position.set(0, 0, -(Z_EGO + size.z/2));            // 车尾对齐 Z_EGO
+  scene.add(car);
+  window.__car = { size, tailMats: tailMats.length, rearSign, halfLen:+halfLen.toFixed(2) };
+
+  applyTheme();                      // 模型是异步来的，首帧那次 applyTheme 里还没有尾灯材质
+  document.getElementById('load').className = 'hidden';
+  console.info('Fiesta 就绪：' + size.z.toFixed(2) + 'm 长 × ' + size.x.toFixed(2) + 'm 宽 × ' + size.y.toFixed(2) + 'm 高，尾灯发光材质 ' + tailMats.length + ' 个');
+}, undefined,
+e => {
+  const el=document.getElementById('load');
+  el.className='bad'; el.textContent='模型加载失败：'+(e && e.message || e);
+});
+
+/* ---------- 昼夜主题 ---------- */
+const mq = matchMedia('(prefers-color-scheme: dark)');
+function applyTheme(){
+  const t = mq.matches ? THEME.dark : THEME.light;
+  scene.background.setHex(t.sky);
+  scene.fog.color.setHex(t.sky);
+  for(const k of ['road','shoulder','edge'])
+    for(const m of (ground[k]||[])) m.material.color.setHex(t[k]);
+  dashMat.color.setHex(t.dash);
+  hemi.intensity = t.hemi; hemi.groundColor.setHex(t.ground);
+  sun.intensity = t.sun;
+  for(const b of beams) b.material.opacity = t.beam;           // 夜间路面光池
+  if(plateLamp) plateLamp.material.opacity = mq.matches ? 0.85 : 0.12;   // 车牌灯随示廓
+  for(const m of carMats) if(m.envMapIntensity !== undefined)
+    m.envMapIntensity = mq.matches ? 0.18 : 0.7;               // 夜间反射压暗
+}
+mq.addEventListener ? mq.addEventListener('change', applyTheme) : mq.addListener(applyTheme);
+
+let vw = 0, vh = 0;
+function resize(){
+  const w = innerWidth, h = innerHeight;
+  if(!w || !h || (w===vw && h===vh)) return;
+  vw = w; vh = h;
+  camera.aspect = w/h; camera.updateProjectionMatrix();
+  // 必须让 three 同时更新 canvas 的 CSS 尺寸：传 false 时 Retina(dpr=2) 上
+  // canvas 会按绘制缓冲尺寸排版，整个画面放大一倍，车直接被挤出视窗外
+  renderer.setSize(w, h);
+}
+resize();
+
+/* ---------- 读数 ---------- */
+let tripKm = 0, lastTs = 0, wasDark = null;
+document.getElementById('trip').onclick = ()=>{ tripKm = 0; };
+function paint(){
+  document.getElementById('speed').textContent = Math.round(shown.speed);
+  document.getElementById('vRpm').textContent  = (shown.rpm/1000).toFixed(1)+'k';
+  const t = Math.round(shown.coolant);
+  document.getElementById('vTemp').textContent = t+'°';
+  document.getElementById('cTemp').className = 'card'+(t>=110?' bad':t>=100?' warn':'');
+  document.getElementById('vVolt').textContent = shown.volts.toFixed(1);
+  document.getElementById('cVolt').className = 'card'+
+    (D.connected && (shown.volts<11.5||shown.volts>15.2) ? ' bad':'');
+  document.getElementById('vThr').textContent  = Math.round(shown.throttle)+'%';
+  document.getElementById('vTrip').textContent = tripKm.toFixed(1);
+
+  const st = !D.connected ? 'P' : (shown.speed<2 && shown.rpm<1100 ? 'N' : 'D');
+  document.querySelectorAll('#gearrow i').forEach(i=>i.classList.toggle('dim', i.dataset.g!==st));
+  document.getElementById('ready').textContent = D.connected?'READY':'OFF';
+  document.getElementById('ready').className   = D.connected?'':'off';
+  document.getElementById('dot').className     = 'dot '+(D.connected?'on':'off');
+  document.getElementById('conn').textContent  = D.connected?'OBD 已连接':'OBD 未连接';
+  document.getElementById('lampMIL').className  = 'lamp'+(D.mil?' bad':'');
+  document.getElementById('lampVolt').className = 'lamp'+
+    (D.connected && (shown.volts<11.5||shown.volts>15.2) ? ' bad':'');
+  document.getElementById('lampTemp').className = 'lamp'+(t>=105?' bad':'');
+}
+
+function loop(ts){
+  const dt = lastTs ? Math.min((ts-lastTs)/1000, 1) : 0;   // 上限 1s，防后台回来灌虚假里程
+  lastTs = ts;
+  resize();                                                 // 转屏 / 0x0 启动都能自愈
+  const isDark = mq.matches;
+  if(isDark !== wasDark){ wasDark = isDark; applyTheme(); }
+  for(const k of ['speed','rpm','coolant','volts','throttle']) shown[k]+=(D[k]-shown[k])*0.18;
+  if(D.connected){
+    updateBrake(dt); applyTailGlow();
+    tripKm += shown.speed/3600*dt;
+    const dz = shown.speed/3.6*dt;
+    for(const m of dashes){ m.position.z += dz; if(m.position.z > 8) m.position.z -= 44*7.5; }
+  }
+  paint();
+  renderer.render(scene, camera);
+  requestAnimationFrame(loop);
+}
+
+/* ---------- 演示数据（没有真实 ELM327 时验证画面） ---------- */
+let demoOn = true;
+(function demo(){
+  const cycle=[0,8,14,22,38,52,64,78,88,96,88,72,55,38,24,12,0];
+  let t=0;
+  setInterval(()=>{
+    if(!demoOn) return;
+    const f=(t++/12)%cycle.length, i=Math.floor(f), k=f-i;
+    const s=cycle[i]+(cycle[(i+1)%cycle.length]-cycle[i])*k;
+    D.speed=s;
+    D.rpm  = s<1 ? 820 : 1300 + (s%34)*62;
+    D.throttle = s<1 ? 0 : 20+((t*7)%45);
+    D.coolant = Math.min(92, 68+t/22);
+    D.volts   = D.rpm>900 ? 13.9+Math.sin(t/9)*0.2 : 12.3;
+  }, 90);
+})();
+
+D.connected = true;
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>

@@ -1,0 +1,463 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>ELM327 BLE 探测器 · iPad 车机第一步</title>
+<style>
+  :root{
+    --bg:#12161c; --panel:#1b2027; --panel2:#232a33; --line:#313a45;
+    --txt:#e6ebf1; --dim:#8b98a8; --ok:#3ddc84; --warn:#ffb020; --err:#ff5c5c; --accent:#4aa3ff;
+  }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  body{margin:0;padding:16px;background:var(--bg);color:var(--txt);
+    font:16px/1.5 -apple-system,"SF Pro Text",system-ui,sans-serif}
+  h1{font-size:20px;margin:0 0 4px}
+  h2{font-size:15px;margin:0 0 10px;color:var(--dim);font-weight:600;letter-spacing:.04em;text-transform:uppercase}
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:14px;margin-bottom:14px}
+  .banner{border-radius:12px;padding:10px 14px;margin-bottom:14px;font-weight:600}
+  .banner.bad{background:#3a1c1c;border:1px solid var(--err);color:#ffdede}
+  .banner.good{background:#16301f;border:1px solid var(--ok);color:#d6ffe6}
+  .profs{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:8px}
+  label.prof{display:flex;gap:10px;align-items:flex-start;background:var(--panel2);
+    border:1px solid var(--line);border-radius:10px;padding:10px 12px;cursor:pointer;font-size:14px}
+  label.prof input{margin-top:3px}
+  label.prof.sel{border-color:var(--accent);background:#1e2b3a}
+  label.prof small{display:block;color:var(--dim);font-size:12px;margin-top:2px}
+  button{font:inherit;font-weight:600;border-radius:10px;border:1px solid var(--line);
+    background:var(--panel2);color:var(--txt);padding:11px 16px;cursor:pointer}
+  button:active{transform:scale(.97)}
+  button.pri{background:var(--accent);border-color:var(--accent);color:#08121e}
+  button.mini{padding:7px 11px;font-size:13px;font-weight:500}
+  button:disabled{opacity:.4;cursor:not-allowed}
+  .row{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+  .status{font-size:14px;color:var(--dim);font-variant-numeric:tabular-nums}
+  .status b{color:var(--txt)}
+  table{width:100%;border-collapse:collapse;font-size:13px}
+  th,td{text-align:left;padding:7px 8px;border-bottom:1px solid var(--line);vertical-align:top}
+  th{color:var(--dim);font-weight:600}
+  code,.mono{font-family:ui-monospace,"SF Mono",Menlo,monospace;font-size:12px;word-break:break-all}
+  .tag{display:inline-block;padding:1px 7px;border-radius:20px;font-size:11px;font-weight:700;margin-right:3px}
+  .tag.W{background:#2a3a1e;color:var(--ok)} .tag.N{background:#1e2f3a;color:var(--accent)}
+  .tag.R{background:#3a3320;color:var(--warn)} .tag.I{background:#3a2030;color:#ff8fd0}
+  #log{background:#0d1116;border:1px solid var(--line);border-radius:10px;padding:10px;
+    max-height:46vh;overflow:auto;font-family:ui-monospace,Menlo,monospace;font-size:12px}
+  .line{padding:4px 0;border-bottom:1px solid #1a1f26;white-space:pre-wrap;word-break:break-all}
+  .line .t{color:#5a6672}
+  .line.tx{color:#9ecbff} .line.rx{color:#a6e3a1} .line.sys{color:var(--dim)} .line.err{color:var(--err)}
+  .line.h{color:#6b7684;font-size:11px;padding-left:52px}
+  select,input[type=text]{font:inherit;background:var(--panel2);color:var(--txt);
+    border:1px solid var(--line);border-radius:10px;padding:10px}
+  input[type=text]{flex:1;min-width:180px}
+  textarea{width:100%;min-height:190px;background:#0d1116;color:var(--txt);
+    border:1px solid var(--line);border-radius:10px;padding:10px;font-family:ui-monospace,Menlo,monospace;font-size:11px}
+  .kv{display:grid;grid-template-columns:130px 1fr;gap:4px 10px;font-size:14px}
+  .kv div:nth-child(odd){color:var(--dim)}
+  .verdict{font-size:15px;font-weight:700;padding:10px 14px;border-radius:10px;margin-top:10px}
+  .verdict.ok{background:#16301f;border:1px solid var(--ok)}
+  .verdict.no{background:#3a1c1c;border:1px solid var(--err)}
+</style>
+</head>
+<body>
+
+<h1>ELM327 BLE 探测器</h1>
+<div class="status" style="margin-bottom:12px">目的：确认你手上这个 BLE ELM327 用的是哪一套 GATT 结构，为网页车机定协议。</div>
+
+<div id="env" class="banner"></div>
+
+<div class="panel">
+  <h2>1 · 选择候选 Profile</h2>
+  <div class="profs" id="profs"></div>
+  <div class="row" style="margin-top:12px">
+    <button class="pri" id="btnScan">扫描并连接</button>
+    <button id="btnDisc" disabled>断开</button>
+    <span class="status" id="stat">未连接</span>
+  </div>
+  <div style="font-size:12px;color:var(--dim);margin-top:10px">
+    选 AUTO 会把下面所有候选 profile 的服务 UUID 一起申请下来，然后按特征的实际 properties 判定方向。
+    如果你已经知道型号，选对应 profile 更稳。
+  </div>
+  <div class="row" style="margin-top:10px">
+    <input type="text" id="extraUuid" placeholder="nRF Connect 扫到但这里没有的服务 UUID，如 abcd 或 12345678-1234-5678-1234-567890abcdef" autocomplete="off">
+    <button class="mini" id="btnHelp">为什么必须填？</button>
+  </div>
+  <div style="font-size:12px;color:var(--dim);margin-top:6px">
+    Web Bluetooth 只能看到你在请求里<b>点名过的</b>服务，无法自由枚举。所以未编目的适配器必须把 UUID 抄进这里，否则扫出来是空的。
+  </div>
+</div>
+
+<div class="panel">
+  <h2>2 · 设备信息</h2>
+  <div class="kv" id="devinfo"><div>状态</div><div>未连接</div></div>
+</div>
+
+<div class="panel">
+  <h2>3 · GATT 结构（实测，不是猜的）</h2>
+  <div id="gatt"><span class="status">连接后自动填充。</span></div>
+  <div class="row" style="margin-top:12px">
+    <span class="status">指令特征 (write)</span>
+    <select id="selTx" style="max-width:260px"><option>—</option></select>
+    <span class="status">回传特征 (notify)</span>
+    <select id="selRx" style="max-width:260px"><option>—</option></select>
+    <button class="mini" id="btnResub">重新订阅</button>
+  </div>
+  <div class="verdict" id="verdict" hidden></div>
+</div>
+
+<div class="panel">
+  <h2>4 · AT 指令测试</h2>
+  <div class="row">
+    <button class="mini" data-cmd="ATZ">ATZ 复位</button>
+    <button class="mini" data-cmd="AT">AT 活着吗</button>
+    <button class="mini" data-cmd="ATE0">ATE0 关回显</button>
+    <button class="mini" data-cmd="ATL1">ATL1 开换行</button>
+    <button class="mini" data-cmd="ATL0">ATL0 关换行</button>
+    <button class="mini" data-cmd="ATRV">ATRV 电压</button>
+    <button class="mini" data-cmd="ATRP">ATRP 复位原因</button>
+  </div>
+  <div class="row" style="margin-top:8px">
+    <button class="mini" data-cmd="0100">0100 支持性</button>
+    <button class="mini" data-cmd="010D">010D 车速</button>
+    <button class="mini" data-cmd="010C">010C 转速</button>
+    <button class="mini" data-cmd="0105">0105 水温</button>
+    <button class="mini" data-cmd="0111">0111 节气门</button>
+    <button class="mini" data-cmd="0104">0104 负荷</button>
+    <button class="mini" data-cmd="010F">010F 进气温</button>
+  </div>
+  <div class="row" style="margin-top:12px">
+    <input type="text" id="raw" placeholder="手动输入，如 012F 或 ATSP0（\\r 自动加）" autocomplete="off">
+    <button id="btnSend" disabled>发送</button>
+    <button class="mini" id="btnInit" disabled>跑初始化序列</button>
+  </div>
+</div>
+
+<div class="panel">
+  <h2>5 · 收发日志</h2>
+  <div class="row" style="margin-bottom:8px">
+    <button class="mini" id="btnClear">清空</button>
+    <button class="mini" id="btnReport">生成报告（把结果发给我用）</button>
+    <span class="status" id="rstat"></span>
+  </div>
+  <div id="log"><div class="line sys">等待连接…</div></div>
+  <textarea id="report" readonly placeholder="点「生成报告」后这里会出现可直接复制粘贴的全文。"></textarea>
+</div>
+
+<script>
+const BASE = '-0000-1000-8000-00805f9b34fb';
+const u16  = h => { if(!/^[0-9a-f]{4}$/.test(h)) throw new Error('u16 只接受 4 位 SIG 短 UUID: '+h);
+                    return ('0000'+h).slice(-8) + BASE; };
+// Nordic UART 不是 SIG 短形式，尾段完全不同，必须单独构造。
+const NUS  = h => h + '-b5a3-f393-e0a9-e50e24dcca9e';
+
+// nRF Connect 里可能抄到 4 位短形式或完整 128 位，都归一成小写完整形式。
+function norm(x){
+  x = x.trim().toLowerCase();
+  if(/^[0-9a-f]{4}$/.test(x)) return u16(x);
+  if(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(x)) return x;
+  return null;
+}
+
+// tx / rx 为约定猜测；页面会用实测 properties 覆盖，猜测只用于排序与提示。
+const PROFILES = [
+  { id:'auto', name:'AUTO · 自动判定',
+    desc:'一次申请全部候选服务，按 properties 找 write / notify。第一次建议用它。',
+    services:['18f0','ffe0','ff00','fff0'].map(u16).concat([NUS('6e400001')]),
+    guess:null },
+  { id:'18f0', name:'A · 18F0 / 2AF0 · 2AF1',
+    desc:'ChatGPT 会话里列为「Vgate 部分型号」。',
+    services:[u16('18f0')], tx:u16('2af1'), rx:u16('2af0') },
+  { id:'ffe0', name:'B · FFE0 / FFE1（单特征读写）',
+    desc:'最常见于国产廉价 BLE ELM327 迷你款；同一个特征既能 write 又 notify。',
+    services:[u16('ffe0')], tx:u16('ffe1'), rx:u16('ffe1') },
+  { id:'ff00', name:'C · FF00 / FF02 · FF01',
+    desc:'TI CC254x / vLinker / MDI 一类串口透传常用这套（会话里没提到，补上）。',
+    services:[u16('ff00')], tx:u16('ff02'), rx:u16('ff01') },
+  { id:'fff0', name:'D · FFF0 / 2FF1 · 2FF2',
+    desc:'OBDLink、STN1180/FireFly 方案常用这套（会话里没提到，补上）。',
+    services:[u16('fff0')], tx:u16('2ff1'), rx:u16('2ff2') },
+  { id:'nus',  name:'E · Nordic UART 6E400001',
+    desc:'ESP32 / nRF 自制适配器；6E400002 收、6E400003 发。',
+    services:[NUS('6e400001')], tx:NUS('6e400002'), rx:NUS('6e400003') },
+];
+
+const DEVINFO = u16('180a');
+const S = { server:null, device:null, txChar:null, rxChar:null,
+            sub:null, buf:new Uint8Array(0), pending:null, idle:null,
+            profile:'auto', report:[] };
+
+const $ = s => document.querySelector(s);
+const hex = b => Array.from(b).map(x=>x.toString(16).padStart(2,'0')).join(' ');
+const asc = b => Array.from(b).map(x=> x===13?'⏎':x===10?'↵':x===62?'>':x>=32&&x<127?String.fromCharCode(x):'·').join('');
+
+/* ---------- env check ---------- */
+(function checkEnv(){
+  const el = $('#env');
+  const secure = window.isSecureContext;
+  const hasBT  = !!(navigator.bluetooth && navigator.bluetooth.requestDevice);
+  if (secure && hasBT)      el.className='banner good', el.textContent='✓ 安全上下文 + Web Bluetooth 可用';
+  else if (!secure)         el.className='banner bad',
+        el.textContent='✗ 当前不是安全上下文（需要 https://）。navigator.bluetooth 不会注入，本页无法工作。';
+  else                      el.className='banner bad',
+        el.textContent='✗ 此浏览器无 Web Bluetooth。请用 Bluefy 打开本页，不是 Safari。';
+})();
+
+/* ---------- profile UI ---------- */
+PROFILES.forEach(p=>{
+  const l=document.createElement('label');
+  l.className='prof'+(p.id==='auto'?' sel':''); l.dataset.id=p.id;
+  l.innerHTML=`<input type="radio" name="prof" value="${p.id}" ${p.id==='auto'?'checked':''}>
+               <span><b>${p.name}</b><small>${p.desc}</small></span>`;
+  $('#profs').appendChild(l);
+});
+$('#profs').addEventListener('change',e=>{
+  S.profile=e.target.value;
+  document.querySelectorAll('label.prof').forEach(x=>x.classList.toggle('sel',x.dataset.id===S.profile));
+});
+$('#btnHelp').onclick = ()=>log('sys',
+  'Web Bluetooth 出于隐私考虑不允许网页自由枚举 BLE 服务：只有在 requestDevice 的 optionalServices 里点过名的服务才看得见。'+
+  '所以本页看不到你设备的真实服务时，先用 nRF Connect 扫出 Service UUID，填进上方输入框再重扫。');
+
+/* ---------- log ---------- */
+function log(kind, text, sub){
+  const d=document.createElement('div');
+  d.className='line '+kind;
+  d.innerHTML=`<span class="t">${new Date().toLocaleTimeString('en-GB')}</span>  ${text}`;
+  $('#log').appendChild(d);
+  if(sub){ const s=document.createElement('div'); s.className='line h'; s.textContent=sub; $('#log').appendChild(s); }
+  $('#log').scrollTop=$('#log').scrollHeight;
+  S.report.push(`[${kind}] ${text}${sub?'\n         '+sub:''}`);
+}
+
+/* ---------- connect ---------- */
+$('#btnScan').onclick = async ()=>{
+  const p = PROFILES.find(x=>x.id===S.profile);
+  const toks = $('#extraUuid').value.split(/[\s,;]+/).filter(Boolean);
+  const extra = [], bad = [];
+  toks.forEach(t=>{ const n=norm(t); n ? extra.push(n) : bad.push(t); });
+  if(bad.length) log('err','无法识别的 UUID，已跳过：'+bad.join(' '));
+  const optional = [...new Set(p.services.concat(extra, [DEVINFO]))];
+  log('sys',`申请 ${optional.length} 个服务 · profile=${p.id}${extra.length?' · 自定义 '+extra.length+' 个':''}`);
+  try{
+    S.device = await navigator.bluetooth.requestDevice({ acceptAllDevices:true, optionalServices:optional });
+  }catch(e){
+    log('err','requestDevice 失败：'+e.message);
+    $('#verdict').hidden=false; $('#verdict').className='verdict no';
+    $('#verdict').textContent='没拿到设备。常见原因：蓝牙未开 / 点火未开 / 设备已被系统配对占用 / 弹窗里没选中它。';
+    return;
+  }
+  S.device.addEventListener('gattserverdisconnected', onDisconnect);
+  $('#stat').innerHTML='<b>连接中…</b>';
+  try{ S.server = await S.device.gatt.connect(); }
+  catch(e){ log('err','GATT 连接失败：'+e.message); return; }
+  log('sys','已连接，枚举服务…');
+  await enumerate();
+  $('#btnDisc').disabled=false; $('#btnSend').disabled=false; $('#btnInit').disabled=false;
+  $('#stat').innerHTML=`<b>${S.device.name||'(无名)'}</b> · 已连接`;
+};
+
+$('#btnDisc').onclick = ()=>{ if(S.server) S.server.disconnect(); };
+
+function onDisconnect(){
+  log('sys','已断开');
+  $('#stat').innerHTML='连接已断开';
+  $('#btnDisc').disabled=true; $('#btnSend').disabled=true; $('#btnInit').disabled=true;
+  if(S.rxChar){ try{ S.rxChar.stopNotifications(); }catch(_){} }
+  S.sub=null;
+}
+
+/* ---------- enumerate ---------- */
+async function enumerate(){
+  const rows=[]; const txOpts=[], rxOpts=[];
+  let services=[];
+  try{ services = await S.server.getPrimaryServices(); }
+  catch(e){ log('err','getPrimaryServices：'+e.message); }
+
+  // 设备名 / 型号，用来反推 profile
+  try{
+    const di = await S.server.getPrimaryService(DEVINFO);
+    const out={};
+    for(const [uuid,label] of [['2a29','制造商'],['2a24','型号'],['2a25','序列号'],['2a26','固件']]){
+      try{ const c=await di.getCharacteristic(u16(uuid));
+           out[label]=new TextDecoder().decode(dvBytes(await c.readValue())); }catch(_){}
+    }
+    Object.entries(out).forEach(([k,v])=>log('sys',`DeviceInfo ${k}: ${v}`));
+  }catch(_){ /* 多数 ELM 克隆不提供 */ }
+
+  for(const svc of services){
+    if(svc.uuid===DEVINFO) continue;
+    let chars=[];
+    try{ chars = await svc.getCharacteristics(); }
+    catch(e){ log('err',`服务 ${short(svc.uuid)} 取特征失败：${e.message}`); }
+    const svcRows=[];
+    for(const c of chars){
+      const pr=c.properties;
+      const tags=[pr.read&&'R',pr.write&&'W',pr.writeWithoutResponse&&'Wo',pr.notify&&'N',pr.indicate&&'I']
+                 .filter(Boolean).map(t=>`<span class="tag ${t[0]==='W'?'W':t[0]}">${t}</span>`).join('');
+      svcRows.push(`<td class="mono">${short(c.uuid)}</td><td>${tags}</td>
+        <td>${[pr.write&&'write',pr.writeWithoutResponse&&'writeWithoutResponse',
+               pr.notify&&'notify',pr.indicate&&'indicate',pr.read&&'read'].filter(Boolean).join(', ')||'—'}</td>`);
+      if(pr.write||pr.writeWithoutResponse) txOpts.push({uuid:c.uuid,label:`${short(svc.uuid)} / ${short(c.uuid)}`,char:c});
+      if(pr.notify||pr.indicate)            rxOpts.push({uuid:c.uuid,label:`${short(svc.uuid)} / ${short(c.uuid)}`,char:c});
+    }
+    rows.push(`<tr><td colspan="3" style="color:var(--accent);font-weight:700">服务 ${short(svc.uuid)} <span class="mono" style="color:var(--dim)">${svc.uuid}</span></td></tr>`
+            + svcRows.map(cells=>`<tr>${cells}</tr>`).join(''));
+  }
+
+  if(!rows.length){
+    $('#gatt').innerHTML='<span class="status">没枚举到任何服务。Web Bluetooth 只会显示你在请求里点过名的服务，说明你适配器的服务 UUID 不在候选表里。'+
+      '<br>→ 先确认选的是 AUTO；还不行就把 nRF Connect 里看到的 Service UUID 抄进上方「自定义服务 UUID」输入框，重新扫描。</span>';
+    verdict(null); return;
+  }
+  $('#gatt').innerHTML=`<table><tr><th>Characteristic</th><th>Properties</th><th>能力</th></tr>${rows.join('')}</table>`;
+
+  fillSelect('#selTx',txOpts); fillSelect('#selRx',rxOpts);
+  autoPick(txOpts,rxOpts);
+  $('#devinfo').innerHTML =
+    `<div>设备名</div><div>${S.device.name||'(广播无名)'}</div>`+
+    `<div>Profile</div><div>${S.profile}</div>`+
+    `<div>可见服务</div><div class="mono">${services.map(s=>short(s.uuid)).join(' · ')}</div>`;
+}
+
+const short = u => u.startsWith('0000') ? u.slice(4,8).toUpperCase() : u.slice(0,8).toUpperCase();
+const dvBytes = dv => new Uint8Array(dv.buffer, dv.byteOffset, dv.byteLength);
+function fillSelect(sel, opts){
+  const el=$(sel); el.innerHTML='';
+  opts.forEach((o,i)=>{ const x=document.createElement('option'); x.textContent=o.label; x.dataset.i=i; el.appendChild(x); });
+  el.dataset.opts=JSON.stringify(opts.map(o=>o.uuid));
+  el._opts=opts;
+}
+
+/* 按 profile 猜测优先，落不到就用 properties 找到的第一个 */
+function autoPick(txOpts,rxOpts){
+  const p=PROFILES.find(x=>x.id===S.profile);
+  const pick=(opts,want)=>{
+    if(want){ const h=(want||'').slice(4,8).toUpperCase();
+              const m=opts.find(o=>o.uuid.slice(4,8).toUpperCase()===h); if(m) return m; }
+    return opts[0]||null;
+  };
+  const tx = pick(txOpts, p.tx), rx = pick(rxOpts, p.rx);
+  if(tx){ $('#selTx').value=''; [...$('#selTx').options].forEach((o,i)=>{ if(txOpts[i]===tx) o.selected=true; });
+          S.txChar=tx.char; }
+  if(rx){ [...$('#selRx').options].forEach((o,i)=>{ o.selected=(rxOpts[i]===rx); });
+          S.rxChar=rx.char; }
+  if(S.rxChar) subscribe();
+  verdict(tx&&rx ? {tx:tx.label,rx:rx.label,same:(tx.char===rx.char)} : null);
+}
+
+function verdict(v){
+  const el=$('#verdict'); el.hidden=false;
+  if(!v){ el.className='verdict no'; el.textContent='未能确定可用的读写特征组合。'; return; }
+  const hit = matchProfile(v);
+  const known = !hit.startsWith('未编目');
+  el.className = 'verdict ' + (known ? 'ok' : 'no');
+  el.innerHTML = `✓ 指令走 <b class="mono">${v.tx}</b>，回传走 <b class="mono">${v.rx}</b>`
+    + (v.same?'（同一特征，环回模式）':'')
+    + `<br>结论：${known
+        ? '这套 GATT 结构是 <b>'+hit+'</b>，网页车机就按这个写。'
+        : '<b>'+hit+'</b> —— 方向和 UUID 已经拿到了，把报告发我，我据此补进候选表。'}`;
+}
+function matchProfile(v){
+  const key = s => (s.split('/')[0]||'').trim();
+  const map={'18F0':'A · 18F0/2AF0·2AF1','FFE0':'B · FFE0/FFE1 单特征','FF00':'C · FF00/FF02·FF01',
+             'FFF0':'D · FFF0/2FF1·2FF2','6E400001':'E · Nordic UART'};
+  const look = k => { const e = Object.entries(map).find(([p])=>k.startsWith(p)); return e ? e[1] : null; };
+  return look(key(v.tx)) || look(key(v.rx)) || ('未编目（服务 '+key(v.tx)+'），请把报告发我');
+}
+
+/* ---------- subscribe ---------- */
+async function subscribe(){
+  if(S.sub && S.sub!==S.rxChar){ try{ await S.sub.stopNotifications(); }catch(_){} }
+  S.sub=S.rxChar; S.buf=new Uint8Array(0);
+  S.rxChar.addEventListener('characteristicvaluechanged', onNotify);
+  try{ await S.rxChar.startNotifications(); log('sys','已订阅 notify：'+short(S.rxChar.uuid)); }
+  catch(e){ log('err','订阅失败：'+e.message); }
+}
+$('#selTx').onchange=e=>{ const o=$('#selTx')._opts[[...e.target.options].findIndex(x=>x.selected)];
+                          if(o){ S.txChar=o.char; log('sys','指令特征改为 '+o.label); } };
+$('#selRx').onchange=async e=>{ const o=$('#selRx')._opts[[...e.target.options].findIndex(x=>x.selected)];
+                          if(o){ S.rxChar=o.char; await subscribe(); } };
+$('#btnResub').onclick=()=>{ if(S.rxChar) subscribe(); };
+
+function onNotify(ev){
+  const inc=dvBytes(ev.target.value);
+  log('rx',`← ${inc.length}B  [${hex(inc)}]`, '      '+asc(inc));
+  const merged=new Uint8Array(S.buf.length+inc.length);
+  merged.set(S.buf); merged.set(inc,S.buf.length); S.buf=merged;
+  clearTimeout(S.idle);
+  let e=S.buf.length; while(e>0&&(S.buf[e-1]===0x20||S.buf[e-1]===0x0A)) e--;
+  const tail = e>0 ? S.buf[e-1] : 0;
+
+  const term = tail===0x3E;                       // 只认 > 提示符为确定终止
+  S.idle=setTimeout(()=>{ if(S.pending) settle(); }, term ? 60 : 350);
+}
+function settle(){
+  clearTimeout(S.idle);
+  const txt = new TextDecoder().decode(S.buf).trim();
+  S.buf=new Uint8Array(0);
+  if(S.pending){ const r=S.pending; S.pending=null; r(txt); }
+}
+
+/* ---------- send ---------- */
+const CANCELLED = Symbol('cancelled');
+async function send(cmd, waitMs=3000){
+  if(!S.txChar||!S.rxChar){ log('err','还没选定指令/回传特征'); return null; }
+  clearTimeout(S.idle);
+  if(S.pending){ const prev=S.pending; S.pending=null; prev(CANCELLED); }
+  S.buf=new Uint8Array(0);
+  const p=new Promise(r=>S.pending=r);
+  const bytes=new TextEncoder().encode(cmd+'\r');
+  const mode = S.txChar.properties.writeWithoutResponse ? 'writeValueWithoutResponse' : 'writeValue';
+  try{ mode==='writeValueWithoutResponse' ? S.txChar.writeValueWithoutResponse(bytes) : await S.txChar.writeValue(bytes); }
+  catch(e){ log('err','写入失败：'+e.message); S.pending=null; return null; }
+  log('tx',`→ ${cmd}   [${hex(bytes)}]`);
+  const reply = await Promise.race([p, new Promise(r=>setTimeout(()=>r(null),waitMs))]);
+  if(reply===CANCELLED){ log('err',`${cmd} 被后续指令打断，回传已丢弃`); return null; }
+  if(reply===null){ log('err',`${cmd} 超时 ${waitMs}ms 无回传`); return null; }
+  log('sys',`解析: ${JSON.stringify(reply)}`);
+  return reply;
+}
+$('#btnSend').onclick=async()=>{ const v=$('#raw').value.trim(); if(v) await send(v); $('#raw').value=''; };
+$('#raw').addEventListener('keydown',e=>{ if(e.key==='Enter'){ e.preventDefault(); $('#btnSend').click(); }});
+document.querySelectorAll('[data-cmd]').forEach(b=>b.onclick=()=>send(b.dataset.cmd));
+$('#btnInit').onclick=async()=>{
+  for(const c of ['ATZ','ATE0','ATL1']) await send(c,3000);
+  log('sys','初始化完成 —— 现在点 010D / 010C 验证能不能真读到数据');
+};
+
+/* ---------- report ---------- */
+$('#btnReport').onclick=()=>{
+  const p=PROFILES.find(x=>x.id===S.profile);
+  const t=[
+    '=== ELM327 BLE 探测报告 ===',
+    '时间: '+new Date().toISOString(),
+    '选定 profile: '+p.name,
+    '设备名: '+(S.device?S.device.name||'(广播无名)':'(未连接)'),
+    '',
+    '--- GATT 实测 ---',
+    ...collectGatt(),
+    '',
+    '--- 判定 ---',
+    $('#verdict').hidden?'(无)':$('#verdict').innerText,
+    '',
+    '--- 收发日志 ---',
+    ...S.report,
+  ].join('\n');
+  $('#report').value=t;
+  $('#report').scrollIntoView({behavior:'smooth'});
+  $('#rstat').textContent='已生成，全选复制即可。';
+  navigator.clipboard && navigator.clipboard.writeText(t).then(
+    ()=>$('#rstat').textContent='已生成并复制到剪贴板。', ()=>{});
+};
+function collectGatt(){
+  const out=[];
+  document.querySelectorAll('#gatt table tr').forEach(tr=>{
+    if(tr.querySelector('th')) return;
+    const txt=tr.innerText.replace(/\s+/g,' ').trim();
+    if(txt) out.push(txt);
+  });
+  return out.length?out:['(未枚举)'];
+}
+$('#btnClear').onclick=()=>{ $('#log').innerHTML=''; S.report=[]; $('#report').value=''; };
+</script>
+</body>
+</html>
