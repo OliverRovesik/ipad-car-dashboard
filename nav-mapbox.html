@@ -1,0 +1,749 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Navigation · Mapbox build (with lane guidance)</title>
+<style>
+  :root{
+    --bg:#0e1216; --pnl:rgba(22,28,36,.88); --pnl2:#1c232c; --line:rgba(150,165,185,.2);
+    --fg:#eef2f7; --dim:#8b98a8; --acc:#4aa3ff; --ok:#2fd07d; --warn:#f0b429;
+    --lane:#37414d; --laneOn:#4aa3ff; --route:#4aa3ff;
+  }
+  @media (prefers-color-scheme: light){
+    :root{ --bg:#eef1f5; --pnl:rgba(255,255,255,.9); --pnl2:#e6ebf1; --line:rgba(120,132,148,.28);
+           --fg:#0d1319; --dim:#68727f; --lane:#c8d0da; --route:#1a73e8; }
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--fg);
+    font:15px/1.4 -apple-system,"SF Pro Display",system-ui,sans-serif}
+  #mapWrap{position:fixed;inset:0;background:var(--bg)}
+  #mapImg{width:100%;height:100%;object-fit:cover;display:block}
+  #glmap{position:absolute;inset:0;display:none}
+  .carDot{width:22px;height:22px;border-radius:50%;background:#1a73e8;
+    border:3px solid #fff;box-shadow:0 2px 8px rgba(0,0,0,.45)}
+  .mapboxgl-ctrl,.mapboxgl-ctrl-group{background:var(--pnl2)!important}
+  .mapboxgl-map{font:inherit}
+  #sketch{position:absolute;inset:0;width:100%;height:100%}
+  .ov{position:fixed;z-index:5}
+  .glass{background:var(--pnl);backdrop-filter:blur(16px);border:1px solid var(--line);border-radius:16px}
+
+  #top{left:16px;right:16px;top:14px;padding:12px 16px;display:flex;gap:12px;align-items:center}
+  #eta{font-size:28px;font-weight:700;font-variant-numeric:tabular-nums;line-height:1}
+  #eta small{font-size:13px;font-weight:600;color:var(--dim);margin-left:3px}
+  #rem{font-size:13.5px;color:var(--dim);font-weight:600;font-variant-numeric:tabular-nums}
+  #mode{font-size:11.5px;color:var(--warn);font-weight:700;margin-top:2px}
+  #dest{flex:1;text-align:right;font-size:13.5px;font-weight:600}
+  #dest small{display:block;color:var(--dim);font-weight:500;font-size:11px;letter-spacing:.08em;text-transform:uppercase}
+
+  /* 车道图 */
+  #lanes{left:16px;bottom:150px;padding:12px 14px;display:none;min-width:260px}
+  #lanes.show{display:block}
+  #lanes h4{font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--dim);margin-bottom:9px;font-weight:700}
+  #laneRow{display:flex;gap:7px}
+  .lane{width:44px;height:58px;border-radius:7px;background:var(--lane);
+    display:flex;align-items:center;justify-content:center;position:relative}
+  .lane.on{background:var(--laneOn)} .lane.on svg{stroke:#08121e}
+  .lane.no{opacity:.32}
+  .lane svg{width:26px;height:34px;fill:none;stroke:var(--fg);stroke-width:2.4;stroke-linecap:round;stroke-linejoin:round}
+  .lane i{position:absolute;bottom:2px;right:4px;font-size:10px;font-style:normal;color:var(--dim);font-weight:700}
+
+  /* 下一步卡 */
+  #next{left:16px;bottom:16px;width:min(420px,52vw);padding:15px 18px;display:flex;gap:15px;align-items:center}
+  #man{width:70px;height:70px;flex:none;border-radius:13px;background:var(--acc);display:flex;align-items:center;justify-content:center}
+  #man svg{width:40px;height:40px;stroke:#08121e;fill:none;stroke-width:2.6;stroke-linecap:round;stroke-linejoin:round}
+  #dist{font-size:36px;font-weight:700;line-height:1;font-variant-numeric:tabular-nums}
+  #dist small{font-size:15px;font-weight:600;color:var(--dim);margin-left:3px}
+  #road{font-size:15.5px;font-weight:600;margin-top:2px}
+  #act{font-size:12px;color:var(--dim);letter-spacing:.08em;text-transform:uppercase;font-weight:700}
+
+  #steps{right:16px;top:96px;bottom:16px;width:min(290px,33vw);padding:10px 4px;overflow:auto}
+  #steps h3{font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--dim);font-weight:700;padding:0 14px 8px}
+  .st{display:flex;gap:9px;padding:8px 14px;font-size:13px;color:var(--dim);align-items:flex-start}
+  .st.done{opacity:.35} .st.now{color:var(--fg);font-weight:600;background:rgba(74,163,255,.15);border-radius:10px}
+  .st i{width:18px;flex:none;text-align:center;font-style:normal;font-weight:700}
+  .st em{font-style:normal;font-size:11.5px;opacity:.8}
+
+  #ctl{left:50%;transform:translateX(-50%);bottom:16px;display:flex;gap:8px;padding:8px;align-items:center}
+  #ctl button,#ctl input{font:inherit;font-size:13px;font-weight:600;border:1px solid var(--line);
+    background:var(--pnl2);color:var(--fg);border-radius:10px;padding:9px 12px;cursor:pointer}
+  #ctl input{width:150px;cursor:text;font-weight:500}
+  #ctl button.on{background:var(--acc);border-color:var(--acc);color:#08121e}
+  #spd{font-size:24px;font-weight:700;font-variant-numeric:tabular-nums;padding:0 8px}
+
+  #setup{left:16px;top:104px;padding:10px 12px;display:flex;gap:8px;align-items:center;
+    font-size:12.5px;flex-wrap:wrap;max-width:min(620px,76vw);position:fixed;z-index:5}
+  #sug{position:absolute;left:0;right:0;top:calc(100% + 6px);display:none;max-height:300px;
+    overflow:auto;background:var(--pnl);backdrop-filter:blur(16px);border:1px solid var(--line);
+    border-radius:12px;z-index:8}
+  #sug.show{display:block}
+  #sug div{padding:10px 13px;font-size:13px;cursor:pointer;border-bottom:1px solid var(--line)}
+  #sug div:last-child{border-bottom:0}
+  #sug div:hover,#sug div.sel{background:rgba(74,163,255,.18)}
+  #sug b{font-weight:700} #sug em{font-style:normal;color:var(--dim);font-size:11.5px;display:block}
+  #setup .saved{font-size:12px;color:var(--dim);font-weight:700;letter-spacing:.06em;margin-left:4px}
+  #setup .quick{padding:8px 11px;font-size:12.5px}
+  #setup .quick.unset{border-style:dashed;color:var(--dim);opacity:.75}
+  #setup .quick.set{background:var(--ok);border-color:var(--ok);color:#06170d;font-weight:700}
+  #setup input{font:inherit;font-size:12.5px;background:var(--pnl2);color:var(--fg);
+    border:1px solid var(--line);border-radius:8px;padding:7px 9px;width:190px}
+  #setup button{font:inherit;font-size:12.5px;font-weight:600;background:var(--pnl2);color:var(--fg);
+    border:1px solid var(--line);border-radius:8px;padding:7px 11px;cursor:pointer}
+  #raw{position:fixed;left:16px;top:190px;z-index:6;max-width:min(420px,44vw);max-height:34vh;overflow:auto;
+    display:none;background:rgba(0,0,0,.72);border:1px solid var(--line);border-radius:12px;padding:10px;
+    font-family:ui-monospace,Menlo,monospace;font-size:11px;white-space:pre-wrap;color:#9fd8ff}
+  #raw.show{display:block}
+  #toast{left:50%;transform:translateX(-50%);top:78px;padding:9px 15px;font-size:13px;font-weight:600;
+    color:var(--warn);display:none;z-index:9}
+  #toast.show{display:block}
+</style>
+<link rel="stylesheet" href="vendor/mapbox-gl.css">
+</head>
+<body>
+<div id="mapWrap">
+  <img id="mapImg" alt="" style="display:none">
+  <div id="glmap"></div>
+  <svg id="sketch" viewBox="0 0 1000 700" preserveAspectRatio="xMidYMid slice"></svg>
+</div>
+
+<div class="ov glass" id="top">
+  <div><div id="eta">—<small>ETA</small></div><div id="rem">—</div><div id="mode"></div></div>
+  <div id="dest"><small>Destination</small><span id="destName">—</span></div>
+</div>
+
+<div class="ov glass" id="lanes"><h4>Lane guidance · highlighted = recommended</h4><div id="laneRow"></div></div>
+
+<div class="ov glass" id="next">
+  <div id="man"><svg id="manIcon" viewBox="0 0 24 24"></svg></div>
+  <div><div id="act">—</div><div id="dist">—<small>ahead</small></div><div id="road">—</div></div>
+</div>
+
+<div class="ov glass" id="steps"><h3>Steps</h3><div id="stepList"></div></div>
+
+<div class="ov glass" id="ctl">
+  <span id="spd">0</span>
+  <button id="bVoice" class="on">Voice</button>
+  <button id="bFollow" class="on">Follow</button>
+  <button id="bExit">Exit</button>
+</div>
+
+<div class="ov glass" id="setup">
+  <input type="text" id="dst" placeholder="Destination" value=""
+        autocomplete="off" style="width:190px">
+  <button id="bGo">Go</button>
+  <button class="quick" id="bHome">Home</button>
+  <button class="quick" id="bWork">Work</button>
+  <button class="quick" id="asHome" style="display:none">Set Home</button>
+  <button class="quick" id="asWork" style="display:none">Set Work</button>
+  <input type="password" id="tok" placeholder="Mapbox public token (pk.…)" autocomplete="off">
+  <span class="saved" id="tkState"></span>
+  <div id="sug"></div>
+</div>
+
+<pre id="raw"></pre>
+<div class="ov glass" id="toast"></div>
+
+<script src="vendor/mapbox-gl.js"></script>
+<script>
+/* ================= 演示数据（无 token 时用）=================
+   车道数组是**手工编的示意值**，不是 Mapbox 真实返回，仅用来让你看版式。
+   真实结构以 ?debug=1 打开的诊断面板为准。 */
+const DEMO = {
+  dest:'Ortigas Center (demo)',
+  pts:[[0.06,0.86],[0.13,0.80],[0.19,0.74],[0.24,0.55],[0.30,0.36],[0.44,0.30],
+       [0.60,0.26],[0.72,0.30],[0.80,0.42],[0.87,0.55],[0.93,0.66]],
+  totalM:6800,
+  steps:[
+    {at:0.00, act:'Depart', road:'BGC High Street',      man:'depart', m:0,    lanes:null},
+    {at:0.16, act:'Turn left', road:'38th Street',          man:'left',   m:300,
+      lanes:[{indications:['straight'],active:false},{indications:['turn_left'],active:true},
+             {indications:['turn_right'],active:false}]},
+    {at:0.40, act:'Keep right', road:'C-5 Road',           man:'slight-right', m:1200,
+      lanes:[{indications:['straight'],active:false},{indications:['straight'],active:true},
+             {indications:['straight','ramp_right'],active:true},{indications:['exit_right'],active:false}]},
+    {at:0.68, act:'Continue straight', road:'Julia Vargas Ave',     man:'straight', m:3500, lanes:null},
+    {at:0.88, act:'Turn right', road:'Garnet Road',          man:'right',    m:1800,
+      lanes:[{indications:['turn_left'],active:false},{indications:['straight'],active:false},
+             {indications:['turn_right'],active:true}]},
+    {at:1.00, act:'Arrive', road:'Ortigas Center',       man:'arrive',   m:0,    lanes:null},
+  ],
+};
+
+const IC = {
+  depart:'<path d="M12 20V6"/><path d="M7 11l5-5 5 5"/>',
+  left:'<path d="M10 20V9a3 3 0 00-3-3H5"/><path d="M8 9l-4-3 4-3"/>',
+  right:'<path d="M14 20V9a3 3 0 013-3h2"/><path d="M16 9l4-3-4-3"/>',
+  'slight-left':'<path d="M12 20v-7a4 4 0 00-3-4l-3-1"/><path d="M9 6L6 9l3 3"/>',
+  'slight-right':'<path d="M12 20v-7a4 4 0 013-4l3-1"/><path d="M15 6l3 3-3 3"/>',
+  straight:'<path d="M12 20V5"/><path d="M8 9l4-4 4 4"/>',
+  uturn:'<path d="M8 20V9a4 4 0 018 0v4"/><path d="M13 16l3 4 3-4"/>',
+  arrive:'<circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/>',
+};
+/* 车道箭头：由 indications 拼出来 */
+const LANE_IC = {
+  straight:'<path d="M13 30V8"/><path d="M10 12l3-4 3 4"/>',
+  turn_left:'<path d="M15 30V18a5 5 0 00-5-5H7"/><path d="M10 8l-4 5 4 5" transform="translate(-1,-1)"/>',
+  turn_right:'<path d="M11 30V18a5 5 0 015-5h3"/><path d="M14 8l4 5-4 5" transform="translate(1,-1)"/>',
+  slight_left:'<path d="M14 30V10"/><path d="M10 15l4-5 4 5" transform="translate(-3,2)"/>',
+  slight_right:'<path d="M10 30V10"/><path d="M6 15l4-5 4 5" transform="translate(3,2)"/>',
+  uturn:'<path d="M9 30V14a4 4 0 018 0v3"/><path d="M14 20l3 4 3-4" transform="translate(-1,0)"/>',
+  ramp_left:'<path d="M15 30V16c0-5-3-6-6-9"/><path d="M6 10l3 6 4-3"/>',
+  ramp_right:'<path d="M9 30V16c0-5 3-6 6-9"/><path d="M18 10l-3 6-4-3"/>',
+  merge_left:'<path d="M12 30V8"/><path d="M5 22l7-14 7 14" opacity=".45"/>',
+  merge_right:'<path d="M12 30V8"/><path d="M5 22l7-14 7 14" opacity=".45"/>',
+};
+function laneIcon(inds){
+  const s=(inds||[]).join('_');
+  for(const k of ['uturn','exit_right','exit_left','ramp_right','ramp_left','merge_right','merge_left',
+                  'turn_right','turn_left','slight_right','slight_left','straight'])
+    if(s.includes(k)) return LANE_IC[k]||LANE_IC.straight;
+  return LANE_IC.straight;
+}
+
+// 车机上只留 4 个控制项，剩下的调试口子走 URL 参数：
+//   ?sim=1 用路线模拟行驶（没有 GPS 也能看动效）  ?demo=1 强制用手绘演示路网
+//   ?pos=lon,lat 固定一个起点  ?carPx=70&carScale=1&carYaw=0&carTilt=0 标定车模（存 localStorage）
+//   ?debug=1 打开诊断面板（车模尺寸、GLB 有没有被取、定位精度都写在那里）
+const Q=new URLSearchParams(location.search);
+const FALLBACK=[121.0244,14.5547];                      // 只在定位拿不到时兜底
+function fixedPos(){
+  const p=(Q.get('pos')||'').split(',').map(Number);
+  return p.length===2&&isFinite(p[0])&&isFinite(p[1]) ? p : null;
+}
+const S={mode:'demo', t:0, zoom:15.6, lastImg:null, imgDead:false, voice:true, steps:DEMO.steps, pts:DEMO.pts,
+         total:DEMO.totalM, idx:0, geo:null, pos:fixedPos(), head:null, speed:null, sim:!!Q.get('sim')};
+const $=s=>document.querySelector(s);
+const fmt=m=>m>=1000?(m/1000).toFixed(1):Math.round(m);
+const un=m=>m>=1000?'km':'m';
+function toast(t){$('#toast').textContent=t;$('#toast').classList.add('show');
+  clearTimeout(toast._);toast._=setTimeout(()=>$('#toast').classList.remove('show'),3600);}
+
+/* ---------- 渲染 ---------- */
+function pointAt(t){const P=S.pts,n=P.length-1,f=Math.max(0,Math.min(1,t))*n,
+  i=Math.min(n-1,Math.floor(f)),k=f-i;
+  return [P[i][0]+(P[i+1][0]-P[i][0])*k, P[i][1]+(P[i+1][1]-P[i][1])*k];}
+function drawSketch(){
+  const svg=$('#sketch'); let g=`<rect width="1000" height="700" fill="var(--bg)"/>`;
+  for(let i=1;i<12;i++) g+=`<line x1="${i*88}" y1="0" x2="${i*88+130}" y2="700" stroke="var(--line)" stroke-width="6"/>`;
+  for(let i=1;i<8;i++)  g+=`<line x1="0" y1="${i*92}" x2="1000" y2="${i*92-55}" stroke="var(--line)" stroke-width="5"/>`;
+  const d=S.pts.map((p,i)=>`${i?'L':'M'}${(p[0]*1000).toFixed(1)} ${(p[1]*700).toFixed(1)}`).join(' ');
+  g+=`<path d="${d}" fill="none" stroke="var(--route)" stroke-width="15" opacity=".3" stroke-linecap="round"/>`;
+  g+=`<path d="${d}" fill="none" stroke="var(--route)" stroke-width="7" stroke-linecap="round"/>`;
+  g+=`<circle cx="${S.pts[0][0]*1000}" cy="${S.pts[0][1]*700}" r="11" fill="var(--ok)"/>`;
+  g+=`<g id="car"><circle r="13" fill="var(--fg)"/><circle r="6" fill="var(--bg)"/></g>`;
+  svg.innerHTML=g; S.marker=$('#car',svg);
+}
+function render(){
+  const done=S.t*S.total;
+  let idx=0; for(let i=0;i<S.steps.length;i++) if(S.t+1e-6>=S.steps[i].at) idx=i;
+  const cur=S.steps[Math.min(idx+1,S.steps.length-1)]; S.idx=idx;
+  const toGo=Math.max(0, cur.at*S.total-done);
+  $('#act').textContent=cur.act; $('#manIcon').innerHTML=IC[cur.man]||IC.arrive;
+  $('#dist').innerHTML=fmt(toGo)+'<small>'+un(toGo)+' ahead</small>';
+  $('#road').textContent=cur.road;
+  $('#rem').textContent=`${fmt(S.total-done)} ${un(S.total-done)} left · ${Math.round((1-S.t)*100)}%`;
+  const arr=new Date(Date.now()+(S.total-done)/(11*3.6)*1000);
+  $('#eta').innerHTML=`${String(arr.getHours()).padStart(2,'0')%12||12}:${String(arr.getMinutes()).padStart(2,'0')}<small>${arr.getHours()<12?'AM':'PM'}</small>`;
+  $('#stepList').innerHTML=S.steps.map((s,i)=>
+    `<div class="st ${i<idx?'done':i===idx?'now':''}"><i>${i<idx?'✓':i+1}</i>
+      <div>${s.act} · <b>${s.road}</b><br><em>${s.m?fmt(s.m)+' '+un(s.m):''}${s.lanes?' · lane data':''}</em></div></div>`).join('');
+  drawLanes(toGo<600 ? (cur.lanes||null) : null);   // 接近路口才显示，别在 1km 外就提示
+  if(S.mode==='demo'&&S.marker){const p=pointAt(S.t),q=pointAt(Math.min(1,S.t+.01));
+    S.marker.setAttribute('transform',`translate(${p[0]*1000} ${p[1]*700}) rotate(${Math.atan2(q[1]-p[1],q[0]-p[0])*180/Math.PI})`);}
+  announce(cur,toGo);
+}
+function drawLanes(lanes){
+  const box=$('#lanes');
+  if(!lanes||!lanes.length){box.classList.remove('show');return;}
+  box.classList.add('show');
+  $('#laneRow').innerHTML=lanes.map((l,i)=>{
+    const act = l.active===true || (Array.isArray(l.active)&&l.active.length);
+    const bad = l.valid===false;
+    return `<div class="lane ${act?'on':''} ${bad?'no':''}">
+      <svg viewBox="0 0 26 34">${laneIcon(l.indications)}</svg>
+      <i>${l.number!=null?l.number:i+1}</i></div>`;}).join('');
+}
+function announceEta(){
+  if(!S.dur) return;
+  const leftMin=Math.max(1, Math.round(S.dur*(1-S.t)/60));
+  const arr=new Date(Date.now()+S.dur*(1-S.t)*1000);
+  const h=arr.getHours()%12||12, ap=arr.getHours()<12?'AM':'PM';
+  const m=String(arr.getMinutes()).padStart(2,'0');
+  toast(`${leftMin} min left - arrival ${h}:${m} ${ap}`);
+  if(S.voice) speakEn(`${leftMin} minutes remaining, arriving around ${h} ${m} ${ap}`);
+}
+function speakEn(text){
+  if(!('speechSynthesis' in window)) return;
+  const u=new SpeechSynthesisUtterance(text);
+  u.lang='en-US'; u.rate=0.95;
+  const v=(speechSynthesis.getVoices()||[]).find(x=>/^en/i.test(x.lang||''));
+  if(v) u.voice=v;
+  try{ speechSynthesis.cancel(); speechSynthesis.speak(u); }catch(e){}
+}
+let told=-1;
+function announce(cur,d){
+  const k=S.steps.indexOf(cur);
+  if(!S.voice||told===k) return;
+  if(d<250){ told=k;
+    toast(`🔊 ${cur.act} in ${Math.round(d)}m → ${cur.road}`);
+    if('speechSynthesis' in window) try{ speakEn(`${cur.act} in ${Math.round(d)} meters, ${cur.road}`); }catch(e){}
+  }
+}
+
+/* ---------- 循环 ---------- */
+let last=0;
+(function loop(ts){
+  if(!last)last=ts; const dt=Math.min(.25,(ts-last)/1000); last=ts;
+  if(S.sim){                                             // ?sim=1：沿路线跑一遍，只为看动效
+    const v=48; S.t=Math.min(1,S.t+(v/3.6*dt)/S.total);
+    if(S.t>=1){S.sim=false; toast('Arrived (simulated)');}
+    S.speed=v;
+    if(glReady){ updateGL(); }
+    else if(S.mode==='mapbox'){const p=pointAt(S.t);      // 静态图是"幻灯片"：移动够远才重取一张
+      if(!S.imgDead && (!S.lastImg || Math.hypot(p[0]-S.lastImg[0], p[1]-S.lastImg[1])*111000 > 180))
+        S.lastImg=p, staticMap();}
+  }
+  $('#spd').textContent = S.speed==null ? '—' : Math.round(S.speed);
+  render(); requestAnimationFrame(loop);
+})(0);
+$('#bVoice').onclick=()=>{S.voice=!S.voice;$('#bVoice').classList.toggle('on',S.voice);};
+function dumpDiag(){                                      // 没有 Raw JSON 按钮了：?debug=1 时常开
+  $('#raw').textContent=JSON.stringify(DIAG,null,1);
+  if(Q.get('debug')) $('#raw').classList.add('show');
+}
+
+/* ---------- Mapbox 真实路线 ---------- */
+const TK='car_mapbox_token';
+function tokOf(){ return localStorage.getItem(TK)||''; }
+function tkState(){
+  const t=tokOf();
+  $('#tok').style.display = t ? 'none' : '';
+  $('#tkState').textContent = t ? `token …${t.slice(-4)}` : 'no token = demo grid';
+}
+// 只存这台设备：改完或回车即保存，存好之后这一行自己收起
+$('#tok').addEventListener('change',e=>{
+  const v=e.target.value.trim();
+  if(v) localStorage.setItem(TK,v); else localStorage.removeItem(TK);
+  e.target.value=''; tkState(); toast(v?'Token saved on this device only':'Token cleared');
+});
+$('#tok').addEventListener('keydown',e=>{ if(e.key==='Enter') e.target.blur(); });
+tkState();
+
+const DIAG = {};
+const SAVED = {home:'car_nav_home', work:'car_nav_work'};
+function readSaved(k){ try{ return JSON.parse(localStorage.getItem(k)||'null'); }catch(e){ return null; } }
+function writeSaved(k,v){ v?localStorage.setItem(k,JSON.stringify(v)):localStorage.removeItem(k); paintSaved(); }
+function paintSaved(){
+  for(const [k,id] of [['home','#bHome'],['work','#bWork']]){
+    const v=readSaved(SAVED[k]), b=$(id);
+    b.textContent = v ? (k==='home'?'Home · ':'Work · ')+(v.short||v.name).split(',')[0]
+                        : (k==='home'?'Home':'Work');
+    b.classList.toggle('set', !!v); b.classList.toggle('unset', !v);
+  }
+}
+let pick=null, sugSeq=0, sugT=null;
+function suggest(q){
+  clearTimeout(sugT);
+  if(!tokOf() || q.trim().length<3){ $('#sug').classList.remove('show'); return; }
+  sugT=setTimeout(async()=>{
+    const seq=++sugSeq;                                  // 丢弃过期响应，否则打字快会串结果
+    try{
+      const u=`https://api.mapbox.com/search/geocode/v6/forward?q=${encodeURIComponent(q)}`+
+              `&limit=6&proximity=${(S.pos||FALLBACK).join(',')}&access_token=${tokOf()}`;
+      const j=await (await fetch(u)).json();
+      if(seq!==sugSeq) return;
+      const fs=(j.features||[]).filter(f=>f.properties&&f.properties.full_address);
+      if(!fs.length){ $('#sug').classList.remove('show'); return; }
+      $('#sug').innerHTML=fs.map((f,i)=>
+        `<div data-i="${i}"><b>${esc(f.properties.name||'')}</b><em>${esc(f.properties.full_address)}</em></div>`).join('');
+      $('#sug').classList.add('show');
+      $('#sug')._fs=fs;
+    }catch(e){ /* 建议失败不阻塞主流程 */ }
+  }, 260);
+}
+function esc(t){ return String(t).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+$('#dst').addEventListener('input',e=>{ pick=null; suggest(e.target.value); });
+$('#dst').addEventListener('focus',e=>{ if(e.target.value.trim().length>=3) suggest(e.target.value); });
+$('#sug').addEventListener('click',e=>{
+  const d=e.target.closest('div[data-i]'); if(!d) return;
+  const f=($('#sug')._fs||[])[+d.dataset.i]; if(!f) return;
+  pick={name:f.properties.full_address, short:f.properties.name, coord:f.geometry.coordinates};
+  $('#dst').value=pick.name; $('#sug').classList.remove('show');
+  $('#asHome').style.display=$('#asWork').style.display='';
+});
+document.addEventListener('click',e=>{ if(!e.target.closest('#setup')) $('#sug').classList.remove('show'); });
+$('#asHome').onclick=()=>{ if(pick){ writeSaved(SAVED.home,pick); toast('Home saved: '+pick.name); } hideSet(); };
+$('#asWork').onclick=()=>{ if(pick){ writeSaved(SAVED.work,pick); toast('Work saved: '+pick.name); } hideSet(); };
+function hideSet(){ $('#asHome').style.display=$('#asWork').style.display='none'; }
+function goSaved(which){
+  const v=readSaved(SAVED[which]);
+  if(!v){ const d=$('#dst'); d.focus(); d.select();
+    toast(which==='home'?'No Home saved yet - search a place, then tap "Set Home"':
+                          'No Work saved yet - search a place, then tap "Set Work"'); return; }
+  pick=v; $('#dst').value=v.name; go(v.name);
+}
+$('#bHome').onclick=()=>goSaved('home');
+$('#bWork').onclick=()=>goSaved('work');
+
+// 起点优先用当前 GPS，否则退回 BGC —— 否则"一键回家"没有意义
+async function originPoint(){
+  if(S.pos) return {name:'Current location', coord:S.pos.slice()};
+  if(navigator.geolocation){
+    try{
+      const pos=await new Promise((res,rej)=>navigator.geolocation.getCurrentPosition(res,rej,
+        {enableHighAccuracy:true, timeout:5000, maximumAge:10000}));
+      S.pos=[pos.coords.longitude, pos.coords.latitude];
+      return {name:'Current location', coord:S.pos.slice()};
+    }catch(e){ /* 定位不可用就用默认起点 */ }
+  }
+  return await geo('BGC, Taguig City', FALLBACK);
+}
+async function geo(q, near){
+  const p = near ? `&proximity=${near[0]},${near[1]}` : '';
+  const r = await fetch(`https://api.mapbox.com/search/geocode/v6/forward?q=${encodeURIComponent(q)}&limit=1${p}&access_token=${tokOf()}`);
+  const j = await r.json(); const f = j.features && j.features[0];
+  if(!f) throw new Error('Address not found: '+q+' (response: '+(j.message||JSON.stringify(j).slice(0,120))+'）');
+  return {name:f.properties.full_address||q, coord:f.geometry.coordinates,
+          matched:f.properties.name, placeType:f.properties['mapbox_id']||''};
+}
+async function go(dstText){
+  if(!tokOf()){ toast('Enter a Mapbox public token first'); return; }
+  toast('Routing…');
+  $('#sug').classList.remove('show');
+  try{
+    const NEAR=S.pos||FALLBACK;
+    const from=await originPoint();
+    // 从建议列表选过就直接用它的坐标，避免同一段文字二次解析到别处
+    const to = (pick && pick.name===dstText) ? pick : await geo(dstText, NEAR);
+    const coords=`${from.coord[0]},${from.coord[1]};${to.coord[0]},${to.coord[1]}`;
+    const url=`https://api.mapbox.com/directions/v5/mapbox/driving/${coords}?steps=true&overview=full&geometries=geojson&access_token=${tokOf()}`;
+    DIAG.origin = `${from.name}  →  [lon ${from.coord[0]}, lat ${from.coord[1]}]`;
+    DIAG.dest = `${to.name}  →  [lon ${to.coord[0]}, lat ${to.coord[1]}]`;
+    DIAG.requestCoords = coords;
+    DIAG.requestURL = url.replace(/access_token=.*/, 'access_token=<redacted>');
+    const resp = await fetch(url); const j = await resp.json();
+    if(!j.routes||!j.routes.length){
+      DIAG.respCode = j.code||'(none)'; DIAG.respMessage = j.message||JSON.stringify(j).slice(0,300);
+      S.geo=DIAG; dumpDiag(); $('#raw').classList.add('show');
+      throw new Error(j.message||'Routing failed');
+    }
+    const rt=j.routes[0], leg=rt.legs[0];
+    DIAG.routeKm = (leg.distance/1000).toFixed(2);
+    if(leg.distance > 150000) toast(`⚠ Route is ${(leg.distance/1000).toFixed(0)} km — not a city trip, coordinates likely resolved wrong. Open with ?debug=1.`);
+    S.pts=rt.geometry.coordinates;                       // [lon,lat]
+    S.total=leg.distance; S.dur=leg.duration; S.mode='mapbox'; S.t=0; told=-1; S.imgDead=false; S.lastImg=null;
+    snapIdx=0; if(S.pos) snapToRoute();                   // 新路线要重开匹配窗口，并且从实车位置起算进度
+    S.steps=leg.steps.map((s,i)=>({
+      at:atOf(s), act:manWord(s), road:nameOf(s), man:manKind(s), m:s.distance,
+      lanes:lanesOf(s) }));
+    S.steps.unshift({at:0,act:'Depart',road:from.name,man:'depart',m:0,lanes:null});
+    S.steps.push({at:1,act:'Arrive',road:to.name,man:'arrive',m:0,lanes:null});
+    $('#destName').textContent=to.name;
+    $('#sketch').style.display='none'; if(!glReady) $('#mapImg').style.display='block';
+    $('#mode').textContent=`Real route · Mapbox · ${(leg.distance/1000).toFixed(1)} km`;
+    S.geo={note:'authoritative lanes schema from the real response', ...DIAG,
+           stepsWithLanes:leg.steps.filter(s=>s.intersections&&s.intersections.some(i=>i.lanes)).slice(0,2)};
+    if(!initGL()) staticMap(); else startNav();
+    toast(`Real route ready: ${leg.steps.length} steps · ${glReady?'interactive GL map':'static image fallback'}`);
+  }catch(e){ toast('Failed: '+e.message+' (details with ?debug=1)'); dumpDiag(); $('#raw').classList.add('show'); }
+}
+$('#bGo').onclick=()=>go($('#dst').value.trim());
+function atOf(s){const c=s.maneuver&&s.maneuver.location; if(!c||!S.pts.length)return 0;
+  let best=0,bd=1e9; for(let i=0;i<S.pts.length;i++){const d=(S.pts[i][0]-c[0])**2+(S.pts[i][1]-c[1])**2;
+    if(d<bd){bd=d;best=i;}} return best/(S.pts.length-1);}
+function manKind(s){const m=(s.maneuver&&s.maneuver.modifier)||'';
+  if(m.includes('uturn'))return'uturn'; if(m.includes('left'))return m.includes('slight')?'slight-left':'left';
+  if(m.includes('right'))return m.includes('slight')?'slight-right':'right'; return'straight';}
+function manWord(s){const k=manKind(s);
+  return {'uturn':'U-turn','left':'Turn left','right':'Turn right','slight-left':'Keep left','slight-right':'Keep right','straight':'Continue straight'}[k];}
+function nameOf(s){return s.name||s.maneuver&&s.maneuver.exit&&('Exit '+s.maneuver.exit)||'—';}
+function lanesOf(s){const its=s.intersections||[];
+  for(let i=its.length-1;i>=0;i--) if(its[i].lanes&&its[i].lanes.length) return its[i].lanes;
+  return null;}
+let imgReq = 0;
+function decimate(pts, maxN){
+  if(pts.length <= maxN) return pts;
+  const out=[], step=(pts.length-1)/(maxN-1);
+  for(let i=0;i<maxN;i++) out.push(pts[Math.round(i*step)]);
+  out[out.length-1]=pts[pts.length-1];
+  return out;
+}
+async function staticMap(){
+  if(S.imgDead) return;
+  const c=S.pts[Math.round(S.t*(S.pts.length-1))];
+  const r5=n=>Math.round(n*1e5)/1e5;                       // 5 位小数≈11m，够用且大幅缩短 URL
+  const car=[r5(c[0]),r5(c[1])];                           // 必须先于 gj：里面用了它
+  const line=decimate(S.pts,120).map(p=>[r5(p[0]),r5(p[1])]);
+  const gj=encodeURIComponent(JSON.stringify({type:'FeatureCollection',features:[
+    {type:'Feature',properties:{},geometry:{type:'LineString',coordinates:line}},
+    // 当前位置：simplestyle 标记，直接画进这张 PNG 里
+    {type:'Feature',properties:{'marker-size':'large','marker-color':'#1a73e8',
+      'marker-opacity':'1','marker-stroke-color':'#ffffff','marker-stroke-width':3},
+      geometry:{type:'Point',coordinates:car}},
+  ]}));
+  // 按视口比例取尺寸（上限 1280）：正方形在横屏上会被 object-fit:cover 裁掉大半
+  const ar=innerWidth/Math.max(1,innerHeight);
+  let w=Math.min(1280,Math.round(innerWidth)), h=Math.round(w/ar);
+  if(h>1280){ h=1280; w=Math.round(h*ar); }
+  const base='https://api.mapbox.com/styles/v1/mapbox/streets-v12/static/';
+  const tk='access_token='+tokOf();
+  const P=r5(c[0])+','+r5(c[1])+','+S.zoom;
+  // 逐级降级：第一个成功的层级就说明 Mapbox 到底拒了哪一部分
+  const tries=[
+    ['overlay + bearing/pitch', `${base}${gj}/${P},0,0/${w}x${h}?${tk}`],
+    ['overlay + center only',     `${base}${gj}/${P}/${w}x${h}?${tk}`],
+    ['overlay + auto framing',     `${base}${gj}/auto?padding=60&width=${w}&height=${h}&${tk}`],
+    ['no overlay, plain map',      `${base}${P}/${w}x${h}?${tk}`],
+  ];
+  DIAG.imgTiers=[];                                 // 每次规划重新记录，避免跨次累积
+  for(const [name,url] of tries){
+    let st, body;
+    try{ const r=await fetch(url); st=r.status;
+      if(r.ok){
+        imgReq++;
+        $('#mapImg').src=URL.createObjectURL(await r.blob());
+        DIAG.imgWinningTier=name; DIAG.imgUrlLen=url.length+' chars';
+        DIAG.ptsRaw=S.pts.length+' → decimated '+line.length;
+        DIAG.imgTiers.push(`${name} ✓ HTTP ${st}`);        // 保留前面失败层级的记录，那才说明问题
+        dumpDiag();
+        $('#mode').textContent=`Real route · Mapbox · ${(S.total/1000).toFixed(1)} km · ${imgReq} map image(s)`;
+        return;
+      }
+      body=(await r.text()).slice(0,200);
+    }catch(e){ st='network error'; body=e.message; }
+    DIAG.imgTiers.push(`${name} → HTTP ${st} ${body||''}`);
+  }
+  S.imgDead=true;                                      // 四级全挂：熔断，不再重复请求烧额度
+  DIAG.failURL = tries[0][1].replace(/access_token=.*/,'access_token=<redacted>');
+  dumpDiag(); $('#raw').classList.add('show');
+  $('#mode').textContent=`Real route · ${(S.total/1000).toFixed(1)} km · every map tier failed (see ?debug=1)`;
+}
+
+/* ================= Mapbox GL JS（交互地图）=================
+   车模走 Mapbox 自己的 model 图层，不再需要 three.js —— 这个页面只用一个 WebGL 使用者。 */
+// 开始导航时的相机姿态：斜上方俯视，不是正上方平面视图
+const DRIVE = { zoom:15.6, pitch:52 };
+// 车模标定。GLB 实测就是实车尺寸（1.99 宽 × 1.57 高 × 3.97 长，从 POSITION accessor 量出来的）。
+// 但 model 图层是按世界米数渲染的：z15.6 时 1px≈3.1m，一辆 3.97m 的车在屏幕上只有 1 个像素，
+// 这才是"导航地图里没有车"的真正原因。所以 scale 必须随 zoom 反向放大，让车在屏幕上基本等大。
+const CAR = { len:3.974, minY:0.165 };
+const MODEL = { px:70, scale:1, yaw:0, tilt:0 };
+try{ Object.assign(MODEL, JSON.parse(localStorage.getItem('car_nav_model')||'{}')); }catch(e){}
+for(const k of ['px','scale','yaw','tilt']){const v=Q.get('car'+k[0].toUpperCase()+k.slice(1));
+  if(v!==null && isFinite(+v)) MODEL[k]=+v;}
+function saveModel(){ localStorage.setItem('car_nav_model', JSON.stringify(MODEL)); }
+function mPerPx(z){ const lat=(S.pos?S.pos[1]:FALLBACK[1])*Math.PI/180;
+  return 156543.03388810236/2**z*Math.cos(lat); }
+function carScaleAt(z){ return Math.max(1, MODEL.px*mPerPx(z)/CAR.len*MODEL.scale); }
+// model-translation 也是世界米、而且不会被 model-scale 放大（bundle 里 scale 和 translation
+// 分别写进 instance buffer 的不同槽位），所以抬升量要跟着同一档 scale 一起算，
+// 否则放大 48 倍后车轮会埋进地里 7.8m。
+function carZoomExpr(axis){ const st=[];
+  for(let z=13;z<=21;z++){ const s=carScaleAt(z);
+    st.push(z,['literal', axis==='scale'?[s,s,s]:[0,0,CAR.minY*s]]); }
+  return ['interpolate',['linear'],['zoom'],...st]; }
+let gl=null, glReady=false, carMk=null, carEl=null, carModelOk=false, follow=true, resumeT=null, etaT=null;
+function setFollow(on){
+  follow=on;
+  const b=$('#bFollow'); b.classList.toggle('on',on);
+  b.textContent = on ? 'Follow' : 'Resume follow';
+  if(resumeT) clearTimeout(resumeT);
+  if(!on) resumeT=setTimeout(()=>setFollow(true), 6000);
+}
+// model 图层的 URI 必须是绝对 URL：这个 build 只认含 "://" 的值或样式里声明过的模型，
+// 相对路径会被静默丢掉（当初"地图里没有车"就是这么来的）。
+const MODEL_URL = new URL('model/fiesta.glb', location.href).href;
+
+function useDot(why,quiet){
+  carModelOk=false;
+  if(carMk) return;
+  DIAG.carDot='dot fallback — '+why;
+  carEl=document.createElement('div'); carEl.className='carDot';
+  carMk=new mapboxgl.Marker({element:carEl, rotationAlignment:'map'}).setLngLat(S.pos||FALLBACK).addTo(gl);
+  if(!quiet) toast('Car model not visible — using a position dot (see ?debug=1)');
+}
+function initGL(){
+  if(gl){ glReady=true; drawGL(); return true; }   // 已存在也必须重画，否则换目的地路线不更新
+  if(!window.mapboxgl){ toast('mapbox-gl.js did not load'); return false; }
+  if(!tokOf()){ toast('Enter a token first'); return false; }
+  // 顺序很关键：先让容器有尺寸，再 new Map()。反过来做的话 Mapbox 按 0×0 算出 canvas，
+  // 结果就是地图只占左上角一小块且不会自己长大。
+  $('#glmap').style.display='block'; $('#sketch').style.display='none'; $('#mapImg').style.display='none';
+  mapboxgl.accessToken=tokOf();
+  gl=new mapboxgl.Map({container:'glmap', style:'mapbox://styles/mapbox/streets-v12',
+    center:S.pos||FALLBACK, zoom:DRIVE.zoom, pitch:DRIVE.pitch,
+    cooperativeGestures:false,                      // 车机是触屏：单指拖动、双指缩放才符合直觉
+    preserveDrawingBuffer:false});
+  // 不加 NavigationControl：那两个小方块就是用户嫌多的图标之一，手势已经能平移/缩放/旋转
+  gl.on('load',async ()=>{
+    gl.addSource('route',{type:'geojson',data:{type:'FeatureCollection',features:[]}});
+    gl.addLayer({id:'casing',type:'line',source:'route',
+      paint:{'line-color':'#0b3d91','line-width':12,'line-opacity':.5,'line-cap':'round','line-join':'round'}});
+    gl.addLayer({id:'line',type:'line',source:'route',
+      paint:{'line-color':'#4aa3ff','line-width':6,'line-cap':'round','line-join':'round'}});
+    gl.addSource('carpos',{type:'geojson',data:carFC(S.pos||FALLBACK)});
+    // 先确认 GLB 取得到再挂 model 层：取不到要说明原因，不能默默变成"没有车"
+    let glbOk=false;
+    if(location.protocol==='file:'){
+      DIAG.glb='file:// origin — the browser will not fetch the .glb; open the https (GitHub Pages) URL';
+    }else{
+      try{ const r=await fetch(MODEL_URL,{headers:{Range:'bytes=0-3'}});
+        glbOk=r.ok||r.status===206; DIAG.glb='HTTP '+r.status+' '+MODEL_URL;
+      }catch(e){ DIAG.glb='fetch failed: '+(e.message||e); }
+    }
+    if(glbOk){
+      try{
+        gl.addLayer({id:'carmodel', type:'model', source:'carpos', minzoom:9,
+          layout:{'model-id':['get','model']},                       // 这个 build 的 URI 从 feature 取
+          paint:{'model-type':'common-3d',
+                 'model-scale':carZoomExpr('scale'),
+                 'model-translation':carZoomExpr('lift'),
+                 'model-rotation':[MODEL.tilt,0,MODEL.yaw]}});
+        carModelOk=true; saveModel();
+        DIAG.carModel='model layer · target '+MODEL.px+'px · scale at z'+DRIVE.zoom+' = '+
+                      carScaleAt(DRIVE.zoom).toFixed(1)+' · rot '+MODEL.tilt+'/'+MODEL.yaw;
+        toast('Car model on — too big/small add ?carPx=110, on its side ?carTilt=90, wrong way ?carYaw=180');
+      }catch(e){ DIAG.carModel='addLayer threw -> dot: '+(e.message||e); }
+    }else toast('Car model unavailable ('+DIAG.glb+') — using dot');
+    if(!carModelOk) useDot(DIAG.glb||'no .glb', true);
+    glReady=true; gl.resize();
+    // addLayer 成功不等于车真的画出来了：Mapbox 只在它自己认为需要时才去取 .glb。
+    // 没有请求 = 图层是空的，这时必须退回圆点并说清原因，不能留一张"没有车的地图"。
+    setTimeout(()=>{
+      if(!carModelOk) return;
+      const hit=performance.getEntriesByType('resource').some(e=>/fiesta\.glb/.test(e.name));
+      DIAG.glbFetch = hit?'fetched by Mapbox':'NEVER REQUESTED — model layer accepted but nothing loaded';
+      if(!hit){ gl.removeLayer('carmodel'); useDot('Mapbox never requested the .glb'); }
+      dumpDiag();
+    },3500);
+    DIAG.glMap='loaded - 1 map load - canvas '+gl.getCanvas().width+'x'+gl.getCanvas().height;
+    if(S.mode==='mapbox') startNav(); else $('#mode').textContent='Live map · '+((S.pos||[]).length?'positioned':'waiting for GPS');
+  });
+  gl.on('dragstart',()=>setFollow(false));
+  gl.on('error',e=>{ const x=e&&e.error; DIAG.glError=(x&&(x.message||JSON.stringify(x)))||JSON.stringify(e).slice(0,200)||String(e);
+    // token 无效/过期时 load 永远不会来，这里必须说清楚，否则就是一片没有解释的空白
+    if(!glReady) $('#mode').textContent='Map failed to load — token rejected? ('+(DIAG.glError||'').slice(0,60)+')';
+    dumpDiag(); });
+  return true;
+}
+function drawGL(){
+  if(!glReady) return;
+  gl.getSource('route').setData({type:'FeatureCollection',features:[
+    {type:'Feature',properties:{},geometry:{type:'LineString',coordinates:S.pts}}]});
+}
+// 车头朝向用路线切线，不用 GPS 航向：等红灯时的位置抖动会把地图转得左右晃
+function routeBearing(){
+  if(S.mode!=='mapbox'||!S.pts||S.pts.length<2) return gl?gl.getBearing():0;
+  const p=pointAt(S.t), q=pointAt(Math.min(1,S.t+.004));
+  return (Math.atan2(q[0]-p[0], q[1]-p[1])*180/Math.PI+360)%360;
+}
+// 开始导航：以驾驶姿态跳到当前位置，而不是 fitBounds 看全程概览
+function startNav(){
+  if(!glReady) return;
+  drawGL();
+  gl.jumpTo({center:S.pos||pointAt(S.t), zoom:DRIVE.zoom, pitch:DRIVE.pitch, bearing:routeBearing()});
+  setFollow(true);
+  announceEta(); clearInterval(etaT);
+  etaT=setInterval(()=>{ if(S.mode==='mapbox') announceEta(); }, 120000);   // 每 2 分钟报一次剩余时间
+}
+function carFC(pt){ return {type:'FeatureCollection',features:[
+  {type:'Feature', id:'car',
+   properties:{model:MODEL_URL},                    // 必须绝对 URL，且键名由 layout['model-id'] 取
+   geometry:{type:'Point', coordinates:pt}}]}; }
+function updateGL(){
+  if(!glReady) return;
+  const here=S.pos||pointAt(S.t);                   // 车标画真实 GPS 点，相机跟的是贴路后的点
+  if(carModelOk) gl.getSource('carpos').setData(carFC(here));
+  else if(carMk) carMk.setLngLat(here);
+  if(follow) gl.jumpTo({center:S.mode==='mapbox'?pointAt(S.t):here, bearing:routeBearing()});
+}
+addEventListener('resize',()=>{ if(gl){ gl.resize(); } });
+$('#bFollow').onclick=()=>{ setFollow(!follow); if(follow && glReady) updateGL(); };
+$('#bExit').onclick=()=>{
+  S.sim=false;
+  clearInterval(etaT); etaT=null;
+  S.mode='demo'; S.t=0; S.steps=DEMO.steps; S.pts=DEMO.pts; S.total=DEMO.totalM; S.dur=0;
+  told=-1;
+  if(glReady){
+    gl.getSource('route').setData({type:'FeatureCollection',features:[]});
+    gl.getSource('carpos').setData(carFC(S.pos||FALLBACK));
+    gl.jumpTo({center:S.pos||FALLBACK, zoom:DRIVE.zoom, pitch:DRIVE.pitch, bearing:0});
+    $('#mode').textContent='Navigation ended · live map';
+  } else {
+    $('#sketch').style.display='block'; $('#mapImg').style.display='none';
+    $('#mode').textContent='Navigation ended';
+    drawSketch();
+  }
+  $('#destName').textContent='—';
+  toast('Navigation ended');
+  render();
+};
+
+/* ---------- 实时位置 ----------
+   车机上没有"模拟行驶"按钮：动就动在 GPS 上。coords.speed 在纯 Wi-Fi 版 iPad 上恒为
+   null（见 field-test.html），所以推不出速度时用相邻定位点的位移兜底。 */
+let gpsId=null, prevFix=null, snapIdx=0;
+function hav(lon1,lat1,lon2,lat2){
+  const r=Math.PI/180, R=6371000, dLat=(lat2-lat1)*r, dLon=(lon2-lon1)*r,
+        a=Math.sin(dLat/2)**2 + Math.cos(lat1*r)*Math.cos(lat2*r)*Math.sin(dLon/2)**2;
+  return 2*R*Math.asin(Math.sqrt(a));
+}
+// 贴路：在上一个匹配点前后各取一段窗口找最近顶点，窗口内没有足够近的点才全量搜。
+// 只往前搜是为了避免平行车道/对面车道把进度往回拽。
+function snapToRoute(){
+  const P=S.pts; if(!P||P.length<2||S.pts[0].length<2) return;
+  const win=[Math.max(0,snapIdx-40), Math.min(P.length-1,snapIdx+120)];
+  let best=-1,bd=Infinity;
+  for(let i=win[0];i<=win[1];i++){const d=(P[i][0]-S.pos[0])**2+(P[i][1]-S.pos[1])**2;
+    if(d<bd){bd=d;best=i;}}
+  if(bd>(150/111320)**2){                            // 窗口内最近的还超过 150m：偏航了，全量再找一次
+    bd=Infinity;
+    for(let i=0;i<P.length;i++){const d=(P[i][0]-S.pos[0])**2+(P[i][1]-S.pos[1])**2;
+      if(d<bd){bd=d;best=i;}}
+  }
+  if(best<0) return;
+  snapIdx=best; S.t=best/(P.length-1);
+}
+function onFix(c,t){
+  S.pos=[c.longitude,c.latitude];
+  if(c.speed!=null) S.speed=Math.abs(c.speed)*3.6;
+  else if(prevFix){
+    const dt=(t-prevFix.t)/1000, d=hav(prevFix.lon,prevFix.lat,c.longitude,c.latitude);
+    if(dt>0.8 && d/dt*3.6 < 200) S.speed=d/dt*3.6;    // 抖一个点不算 200km/h，直接丢
+  }
+  prevFix={lon:c.longitude,lat:c.latitude,t};
+  DIAG.gps=`${c.latitude.toFixed(6)}, ${c.longitude.toFixed(6)} · acc ${Math.round(c.accuracy)}m`+
+           ` · speed ${S.speed==null?'—':Math.round(S.speed)+' km/h'}${c.speed==null?' (from displacement)':''}`;
+  if(S.mode==='mapbox'){
+    snapToRoute();
+    if(!glReady && !S.imgDead && S.lastImg &&
+       hav(S.lastImg[0],S.lastImg[1],c.longitude,c.latitude) > 180) S.lastImg=[c.longitude,c.latitude], staticMap();
+    else if(!glReady && !S.lastImg){ S.lastImg=[c.longitude,c.latitude]; staticMap(); }
+  }
+  if(glReady) updateGL();
+  dumpDiag();
+}
+function startTracking(){
+  if(!navigator.geolocation){ toast('No geolocation on this device'); return; }
+  gpsId=navigator.geolocation.watchPosition(p=>onFix(p.coords,p.timestamp||Date.now()),
+    e=>{ DIAG.gps='unavailable: '+(e.message||('code '+e.code));
+         toast('Location unavailable — '+(e.message||('code '+e.code))); dumpDiag(); },
+    {enableHighAccuracy:true, maximumAge:2000, timeout:20000});
+}
+
+/* ---------- 启动 ---------- */
+$('#destName').textContent='—'; paintSaved();
+tkState();
+startTracking();                                      // 一进来就要定位，不是等点了 Go 才有
+if(!Q.get('demo') && tokOf() && initGL()){
+  $('#mode').textContent='Live map · waiting for GPS';
+  $('#sketch').style.display='none';
+}else{
+  $('#mode').textContent=tokOf()?'Demo grid · GL map unavailable'
+                               :'Demo grid · hand-drawn, NOT a map (add a Mapbox token)';
+  drawSketch();
+}
+render();
+</script>
+</body>
+</html>
