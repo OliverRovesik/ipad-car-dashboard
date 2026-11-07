@@ -81,7 +81,9 @@
   #sug div:last-child{border-bottom:0}
   #sug div:hover,#sug div.sel{background:rgba(74,163,255,.18)}
   #sug b{font-weight:700} #sug em{font-style:normal;color:var(--dim);font-size:11.5px;display:block}
-  #setup .saved{font-size:12px;color:var(--dim);font-weight:700;letter-spacing:.06em;margin-left:4px}
+  #setup .saved{font-size:12px;color:var(--dim);font-weight:700;letter-spacing:.06em;margin-left:4px;
+    cursor:pointer;text-decoration:underline dotted}
+  #setup .saved.bad{color:var(--warn);text-decoration:underline solid}
   #setup .quick{padding:8px 11px;font-size:12.5px}
   #setup .quick.unset{border-style:dashed;color:var(--dim);opacity:.75}
   #setup .quick.set{background:var(--ok);border-color:var(--ok);color:#06170d;font-weight:700}
@@ -320,23 +322,36 @@ function lsGet(){ try{ return localStorage.getItem(TK)||memTok; }catch(e){ retur
 // change 只在失焦时才触发，而 iPad 上直接点 Go 常常是按钮先跑、输入框还没失焦 ——
 // 所以读 token 时必须把输入框里现成的值也算上，否则会报"还没填 token"但其实填了。
 function tokOf(){ return lsGet() || ($('#tok')?$('#tok').value.trim():''); }
+// 公开 token 一定是 pk. 开头。不校验的话，粘错一段话也会照存不误，
+// 之后地图只是静默空白 + "token rejected"，在 iPad 上根本无从下手。
+function okTok(v){ return /^pk\.[A-Za-z0-9_-]{20,}/.test(v); }
 function adoptToken(){
-  const v=$('#tok') ? $('#tok').value.trim() : '';
-  if(v){ lsSet(v); $('#tok').value=''; tkState(); }
-  return tokOf();
+  const v=$('#tok').value.trim();
+  if(!v) return tokOf();
+  if(!okTok(v)) return '';
+  lsSet(v); $('#tok').value=''; tkState(); return v;
 }
 function tkState(){
-  const t=tokOf();
+  const t=tokOf(), el=$('#tkState');
   $('#tok').style.display = t ? 'none' : '';
-  $('#tkState').textContent = t ? `token …${t.slice(-4)}` : 'no token = demo grid';
+  el.classList.toggle('bad', !!t && !okTok(t));
+  el.textContent = !t ? 'no token = demo grid'
+    : okTok(t) ? `token …${t.slice(-4)} · tap to change`
+    : `not a pk. token (…${t.slice(-4)}) · tap to change`;
 }
 // 只存这台设备：改完或回车即保存，存好之后这一行自己收起
 $('#tok').addEventListener('change',e=>{
   const v=e.target.value.trim();
+  if(v && !okTok(v)){ toast('A Mapbox public token starts with "pk." — not saved'); return; }
   lsSet(v); e.target.value=''; tkState();
   toast(v?'Token saved on this device only':'Token cleared');
 });
 $('#tok').addEventListener('keydown',e=>{ if(e.key==='Enter') e.target.blur(); });
+// 存好之后输入框收起了，这个标签就是唯一的改口：点它清掉旧值并把框放回来
+$('#tkState').addEventListener('click',()=>{
+  if(!lsGet()) return;
+  lsSet(''); $('#tok').value=''; tkState(); $('#tok').focus();
+});
 tkState();
 
 const DIAG = {};
@@ -417,7 +432,7 @@ async function geo(q, near){
           matched:f.properties.name, placeType:f.properties['mapbox_id']||''};
 }
 async function go(dstText){
-  if(!adoptToken()){ toast('Enter a Mapbox public token first'); return; }
+  if(!adoptToken()){ toast('Enter a Mapbox public token — it starts with "pk."'); return; }
   toast('Routing…');
   $('#sug').classList.remove('show');
   try{
@@ -575,7 +590,7 @@ function useDot(why,quiet){
 function initGL(){
   if(gl){ glReady=true; drawGL(); return true; }   // 已存在也必须重画，否则换目的地路线不更新
   if(!window.mapboxgl){ toast('mapbox-gl.js did not load'); return false; }
-  if(!adoptToken()){ toast('Enter a token first'); return false; }
+  if(!adoptToken()){ toast('Enter a Mapbox public token — it starts with "pk."'); return false; }
   // 顺序很关键：先让容器有尺寸，再 new Map()。反过来做的话 Mapbox 按 0×0 算出 canvas，
   // 结果就是地图只占左上角一小块且不会自己长大。
   $('#glmap').style.display='block'; $('#sketch').style.display='none'; $('#mapImg').style.display='none';
