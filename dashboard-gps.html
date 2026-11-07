@@ -1,0 +1,832 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<title>Fiesta · 驾驶可视化（GPS 版）</title>
+<!--
+  本版数据源是 GPS，不是 OBD：转速/水温/电压/节气门/故障灯一律不显示，
+  因为 GPS 拿不到这些，伪造它们比不显示更糟。
+  依赖与素材
+  - three.min.js / GLTFLoader.js  r128, MIT (c) 2010-2021 three.js authors，本地副本，无 CDN 依赖
+  - model/fiesta.data.js  内嵌的 "2013 Ford Fiesta ST" 模型(base64)，原文件不在仓库里。
+    作者 Ddiaz Design, https://sketchfab.com/ddiaz-design
+    授权 CC-BY-NC-SA-4.0 —— 署名 + 非商业 + 相同方式共享。再分发时须保留本注释。
+    换模型时从 .glb 重新生成：见 model/fiesta.data.js 文件头的一行命令。
+-->
+<style>
+  :root{
+    --bg:#eef1f5; --ink:#0d1319; --sub:#68727f; --card:rgba(255,255,255,.82);
+    --line:rgba(120,132,148,.28); --green:#12a15c; --amber:#c98a00; --red:#d92d20;
+  }
+  *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+  html,body{height:100%;overflow:hidden;background:var(--bg)}
+  body{font:15px/1.35 -apple-system,"SF Pro Display",system-ui,sans-serif;color:var(--ink);
+    -webkit-font-smoothing:antialiased}
+  #scene{position:fixed;inset:0}
+  #scene canvas{display:block;touch-action:none}
+
+  .ov{position:fixed;z-index:3}
+
+  /* 左上：档位 + 车速 */
+  #topleft{left:26px;top:20px;display:flex;flex-direction:column;gap:2px}
+  #gearrow{display:flex;gap:16px;font-size:21px;font-weight:600;color:var(--sub);letter-spacing:.02em}
+  #gearrow .dim{opacity:.35}
+  #ready{margin-left:6px;font-size:14px;font-weight:700;letter-spacing:.14em;color:var(--green);
+    align-self:center}
+  #ready.off{color:var(--sub)}
+  #speed{font-size:104px;font-weight:300;line-height:.86;letter-spacing:-.04em;
+    font-variant-numeric:tabular-nums}
+  #speedunit{font-size:17px;color:var(--sub);font-weight:600;margin-top:2px}
+
+  /* 左侧告警灯 */
+  #rail{left:28px;top:238px;display:flex;flex-direction:column;gap:13px}
+  .lamp{display:flex;align-items:center;gap:9px;font-size:13.5px;color:var(--sub);font-weight:600}
+  .lamp svg{width:26px;height:20px;stroke:currentColor;fill:none;stroke-width:1.8}
+  .lamp.bad{color:var(--red)}
+
+  /* 右上：OBD 读数 */
+  #obd{right:24px;top:20px;display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end;max-width:46vw}
+  .card{background:var(--card);backdrop-filter:blur(14px);border:1px solid var(--line);
+    border-radius:15px;padding:8px 12px;min-width:82px;text-align:right}
+  .card span{display:block;font-size:10.5px;letter-spacing:.11em;text-transform:uppercase;
+    color:var(--sub);font-weight:700}
+  .card b{display:block;font-size:26px;font-weight:600;font-variant-numeric:tabular-nums;line-height:1.15}
+  .card.warn b{color:var(--amber)} .card.bad b{color:var(--red)}
+
+  /* 右下：里程 */
+  #trip{right:24px;bottom:112px;text-align:right;cursor:pointer}
+  #trip span{font-size:11px;letter-spacing:.12em;color:var(--sub);font-weight:700;text-transform:uppercase}
+  #trip b{display:block;font-size:34px;font-weight:600;font-variant-numeric:tabular-nums}
+  #trip small{font-size:13px;color:var(--sub);font-weight:600}
+
+  /* 底部状态 */
+  /* 顶部中央：日期 / 时间 / 天气 */
+  #clockwx{left:50%;top:20px;transform:translateX(-50%);display:flex;align-items:center;gap:14px;
+    background:var(--card);backdrop-filter:blur(14px);border:1px solid var(--line);
+    border-radius:16px;padding:8px 18px;max-width:32vw;overflow:hidden}
+  #clkTime{font-size:26px;font-weight:600;font-variant-numeric:tabular-nums;letter-spacing:.01em}
+  #clkDate{font-size:12.5px;color:var(--sub);font-weight:600}
+  #wx{font-size:15px;font-weight:600;color:var(--sub);border-left:1px solid var(--line);
+    padding-left:14px;min-width:5.5em}
+  #wx.bad{color:var(--amber)}
+  #hint{left:50%;bottom:74px;transform:translateX(-50%);transition:opacity .5s}
+  #hint.gone{opacity:0}
+
+  #note{left:26px;bottom:18px;display:flex;gap:10px;align-items:center}
+  .chip{background:var(--card);backdrop-filter:blur(14px);border:1px solid var(--line);
+    border-radius:20px;padding:6px 13px;font-size:12.5px;font-weight:600;color:var(--sub);
+    display:flex;align-items:center;gap:7px}
+  .chip.sim{color:#8a5a00;background:rgba(255,224,150,.72);border-color:rgba(200,150,20,.35)}
+  .dot{width:8px;height:8px;border-radius:50%;background:var(--sub)}
+  .dot.on{background:var(--green);box-shadow:0 0 0 3px rgba(18,161,92,.18)}
+  .dot.off{background:var(--red)}
+
+  #load{left:50%;top:50%;transform:translate(-50%,-50%);font-size:14px;font-weight:600;
+    color:var(--sub);background:var(--card);border:1px solid var(--line);border-radius:14px;
+    padding:12px 20px}
+  #load.bad{color:var(--red)}
+  #load.hidden{display:none}
+
+  /* iPad 开夜间模式时整屏跟着变暗 */
+  @media (prefers-color-scheme: dark){
+    :root{
+      --bg:#0e1216; --ink:#eef2f7; --sub:#8b98a8; --card:rgba(22,28,36,.82);
+      --line:rgba(150,165,185,.2); --green:#2fd07d; --amber:#f0b429; --red:#ff5c5c;
+    }
+    .chip.sim{color:#f0c060;background:rgba(120,86,10,.5);border-color:rgba(200,150,20,.3)}
+  }
+</style>
+</head>
+<body>
+<div id="scene"></div>
+
+<div class="ov" id="topleft">
+  <div id="gearrow"><i data-g="P" class="dim">P</i><i data-g="R" class="dim">R</i>
+    <i data-g="N">N</i><i data-g="D" class="dim">D</i><span id="ready">READY</span></div>
+  <div id="speed">0</div>
+  <div id="speedunit">km/h</div>
+</div>
+
+<div class="ov" id="rail">
+  <div class="lamp" id="lampFix"><svg viewBox="0 0 30 20"><path d="M15 3v14M8 9l7-6 7 6"/><circle cx="15" cy="17" r="2"/></svg>等待定位</div>
+  <div class="lamp" id="lampAcc"><svg viewBox="0 0 30 20"><circle cx="15" cy="10" r="6"/><path d="M15 16v4M9 10H5M21 10h4"/></svg>精度未知</div>
+  <div class="lamp" id="lampSrc"><svg viewBox="0 0 30 20"><path d="M4 16h6l4-8 4 8h8"/></svg>速度来源 —</div>
+</div>
+
+<div class="ov" id="obd">
+  <div class="card" id="cAcc"><span>加速度</span><b id="vAcc">—</b></div>
+  <div class="card" id="cAvg"><span>平均车速</span><b id="vAvg">—</b></div>
+  <div class="card" id="cPrec"><span>定位精度</span><b id="vPrec">—</b></div>
+  <div class="card" id="cHead"><span>航向</span><b id="vHead">—</b></div>
+</div>
+
+<div class="ov" id="clockwx">
+  <div><div id="clkTime">--:--</div></div>
+  <div id="clkDate">—</div>
+  <div id="wx">—</div>
+</div>
+
+<div class="ov chip" id="hint">← 拖动可绕车查看 →</div>
+
+<div class="ov" id="trip"><span>Trip</span><b id="vTrip">0.0</b><small>km · 点按清零</small></div>
+
+<div class="ov" id="note">
+  <div class="chip"><i class="dot off" id="dot"></i><span id="conn">OBD 未连接</span></div>
+  <div class="chip sim">道路画面为动画 · 非实景</div>
+</div>
+
+<div class="ov" id="load">正在加载车辆模型…</div>
+
+<script src="vendor/three.min.js"></script>
+<script src="vendor/GLTFLoader.js"></script>
+<script src="model/fiesta.data.js"></script>
+<script>
+/* GPS 版数据接口：只有 GPS 真能给出的量。
+   speed 来自 coords.speed；为 null 时退化成由相邻定位点的位移推算。
+   档位没有数据源，所以 P R N D 只反映"停车/行驶"，R 常暗。 */
+const D = { speed:0, connected:false };
+const shown = { speed:0 };
+const G = { acc:null, head:null, src:'—', lat:null, lon:null, posTs:0, movingSec:0 };
+
+/* ---------- 场景 ---------- */
+const Z_EGO = 3.2;                    // 车尾离相机的距离(米)
+const CAR_LEN = 3.97;                 // Fiesta ST 实车长度(米)，用来归一模型
+const LANE = 3.4, HALF = LANE*1.5;    // 三车道，路面半宽 5.1m
+// 模型车头朝向：导出时车头朝 -Z，跟车视角要看到车尾，所以翻 180°
+const CAR_YAW = Math.PI;
+
+// 昼夜两套场景配色。tail 是尾灯自发光强度：夜间亮，白天灭。
+const THEME = {
+  light:{ sky:0xeef1f5, road:0xccd3db, shoulder:0xcfd5dd, edge:0xb6bfca, dash:0x98a3b1, floor:0xd3dae3,
+          hemi:0.95, sun:0.50, ground:0xb6bfc9, beam:0 },
+  dark: { sky:0x0e1216, road:0x1b2129, shoulder:0x151b22, edge:0x2a333f, dash:0x465262, floor:0x161c24,
+          hemi:0.34, sun:0.24, ground:0x0c1014, beam:0.85 },
+};
+let tailMats = [], rearSign = 0, beams = [], paintMats = [], headSprites = [];
+const SHEEN_DAY = 1.75, SHEEN_NIGHT = 0.46;   // 车漆反射强度
+const PAINT = 0x020c41;                // 车漆：1号(#000538) 与 2号(#04144a) 的正中间；发黑主要靠光泽解决
+
+let renderer, scene, camera, dashes = [];
+try{
+  renderer = new THREE.WebGLRenderer({ antialias:true, alpha:false });
+  renderer.setPixelRatio(Math.min(devicePixelRatio||1, 2));
+  renderer.outputEncoding = THREE.sRGBEncoding;
+  document.getElementById('scene').appendChild(renderer.domElement);
+}catch(e){
+  const el=document.getElementById('load');
+  el.className='bad'; el.textContent='这台设备起不了 WebGL：'+e.message; throw e;
+}
+
+scene = new THREE.Scene();
+scene.background = new THREE.Color(THEME.light.sky);
+scene.fog = new THREE.Fog(THEME.light.sky, 55, 240);   // 远处路面融进背景，替代地平线硬边
+
+camera = new THREE.PerspectiveCamera(58, 1, 0.1, 400);
+
+/* ---------- 停车环绕 / 驾驶视角 + 转场 ---------- */
+// 车中心在模型加载完成后按实际尺寸校正；这里先给一个等尺寸估计值
+const carCenter = new THREE.Vector3(0, 0.78, -(Z_EGO + CAR_LEN/2));
+const CAM = { mode:'park', az:2.42, el:0.34, k:0, stopped:0 };
+let lastMode = 'park';
+const DRIVE_P = new THREE.Vector3(0, 2.45, 0), DRIVE_L = new THREE.Vector3(0, .5, -10);
+const _p = new THREE.Vector3(), _l = new THREE.Vector3(), _t = new THREE.Vector3();
+const ease = t => t<.5 ? 4*t*t*t : 1-Math.pow(-2*t+2,3)/2;
+
+function parkView(){
+  const r = 6.4;
+  _p.set(Math.sin(CAM.az)*r, carCenter.y + 0.55 + CAM.el*2.2, carCenter.z + Math.cos(CAM.az)*r);
+  _l.copy(carCenter).add(_t.set(0, -0.05, 0));
+}
+function updateCamera(dt){
+  CAM.k += ((CAM.mode==='drive'?1:0) - CAM.k) * Math.min(1, dt*3.2);   // 匀速逼近，约 1.2s
+  const e = ease(Math.max(0, Math.min(1, CAM.k)));
+  parkView();
+  camera.position.lerpVectors(_p, DRIVE_P, e);
+  _l.lerpVectors(_l, DRIVE_L, e);
+  camera.lookAt(_l);
+}
+updateCamera(0);
+
+// 拖动：水平转方位、垂直转俯仰。只在停车模式生效。
+let drag = null;
+const cvEl = renderer.domElement;
+cvEl.addEventListener('pointerdown', e=>{
+  if(CAM.mode!=='park') return;
+  drag = { x:e.clientX, y:e.clientY, id:e.pointerId };
+  cvEl.setPointerCapture(e.pointerId);
+  hintDone = true; updateHint();
+});
+cvEl.addEventListener('pointermove', e=>{
+  if(!drag || e.pointerId!==drag.id) return;
+  CAM.az += (e.clientX - drag.x) * 0.008;
+  CAM.el  = Math.max(0.02, Math.min(0.55, CAM.el + (drag.y - e.clientY) * 0.0022));
+  drag.x = e.clientX; drag.y = e.clientY;
+});
+const endDrag = ()=>{ drag = null; };
+let hintDone = false;
+function updateHint(){
+  document.getElementById('hint').classList.toggle('gone', hintDone || CAM.mode!=='park');
+}
+cvEl.addEventListener('pointerup', endDrag);
+cvEl.addEventListener('pointercancel', endDrag);
+
+const hemi = new THREE.HemisphereLight(0xffffff, 0xb6bfc9, 0.95);
+const sun  = new THREE.DirectionalLight(0xffffff, 0.5);
+// 停车视角的主光放在侧前方：绕着拖时一侧被照亮、一侧转进阴影，就是特斯拉那个感觉
+const PARK_KEY = new THREE.Vector3(5.5, 5.2, 4.2), DRIVE_KEY = new THREE.Vector3(-3, 8, -6);
+sun.position.copy(DRIVE_KEY);
+const rim  = new THREE.DirectionalLight(0xdfe9ff, 0);   // 轮廓光，只在停车视角开
+const fill = new THREE.DirectionalLight(0xfff4e2, 0);   // 补光，避免暗面死黑
+rim.position.set(-6, 3.2, -5); fill.position.set(0, 6, 8);
+scene.add(hemi, sun, rim, fill);
+
+let TH = THEME.light, themeK = 1;
+const clamp01 = v => Math.max(0, Math.min(1, v));
+// renderer.outputEncoding = sRGBEncoding 会对输出做 linear->sRGB。
+// 无光照的 MeshBasicMaterial 颜色是按 sRGB 写的，不先转线性就会被编码两次：
+// 实测 0x161c24(22,28,36) 被提亮成 #4f5965(79,89,101)，夜间地面因此发灰。
+const s2l = h => new THREE.Color(h).convertSRGBToLinear();
+function applyLighting(){
+  const e = ease(clamp01(CAM.k)), inv = 1 - e;        // 0=停车 1=驾驶
+  hemi.intensity = (TH.hemi * e + 0.40 * inv) * themeK;
+  sun.intensity  = (TH.sun  * e + 1.35 * inv) * themeK;
+  rim.intensity  = 0.60 * inv * themeK;
+  fill.intensity = 0.30 * inv * themeK;
+  sun.position.lerpVectors(PARK_KEY, DRIVE_KEY, e);
+}
+
+const ground = {};
+function plane(key, w, l, x, z, color){
+  // depthWrite:false 是必须的：transparent 不等于不写深度。路面继续写深度的话，
+  // 位于地面以下的倒影会因为"更远"而被深度测试整个拒掉，看起来像倒影没生效。
+  const m = new THREE.Mesh(new THREE.PlaneGeometry(w, l),
+    new THREE.MeshBasicMaterial({ color: s2l(color), transparent:true, depthWrite:false }));
+  m.rotation.x = -Math.PI/2; m.position.set(x, 0, z);
+  scene.add(m); (ground[key] = ground[key] || []).push(m); return m;
+}
+plane('road',     HALF*2, 420,   0, -190, 0xccd3db);      // 路面
+plane('shoulder', 1.1, 420, -HALF-0.55, -190, 0xcfd5dd);  // 路肩
+plane('shoulder', 1.1, 420,  HALF+0.55, -190, 0xcfd5dd);
+plane('edge',     0.16, 420, -HALF+0.08, -190, 0xb6bfca); // 外边实线
+plane('edge',     0.16, 420,  HALF-0.08, -190, 0xb6bfca);
+
+// 车道虚线：每 7.5m 一段，随车速向相机方向回流
+const dashGeo = new THREE.PlaneGeometry(0.14, 2.6);
+const dashMat = new THREE.MeshBasicMaterial({ color: s2l(0x98a3b1), transparent:true, depthWrite:false });
+for(const lx of [-LANE/2-0.05, LANE/2+0.05])
+  for(let i=0;i<44;i++){
+    const m = new THREE.Mesh(dashGeo, dashMat);
+    m.rotation.x = -Math.PI/2; m.position.set(lx, 0.005, 6 - i*7.5);
+    scene.add(m); dashes.push(m);
+  }
+
+/* ---------- 尾灯光晕 ---------- */
+// 灯罩上色不等于"亮"。真实尾灯看到的是光在往外散，所以用加性混合的柔光贴图
+// 叠在灯的位置上：夜间是常亮的微光，踩刹车时更亮、晕开得更大。
+function glowTexture(){
+  const cv = document.createElement('canvas'); cv.width = cv.height = 128;
+  const x = cv.getContext('2d');
+  // 氛围灯式衰减：中心不给白热芯（加性混合下白芯会烧成"两个太阳"），
+  // 而是直接从半亮红起步，再缓慢铺开
+  const g = x.createRadialGradient(64, 64, 0, 64, 64, 64);
+  g.addColorStop(0,   'rgba(255,62,44,.50)');
+  g.addColorStop(.22, 'rgba(230,30,26,.38)');
+  g.addColorStop(.50, 'rgba(192,14,18,.20)');
+  g.addColorStop(.76, 'rgba(150,6,14,.07)');
+  g.addColorStop(1,   'rgba(140,0,16,0)');
+  x.fillStyle = g; x.fillRect(0, 0, 128, 128);
+  return new THREE.CanvasTexture(cv);
+}
+const glowTex = glowTexture();
+function plateTexture(){                                   // 车牌灯：暖白、横向铺开
+  const cv = document.createElement('canvas'); cv.width = cv.height = 128;
+  const x = cv.getContext('2d');
+  x.save(); x.translate(64,64); x.scale(1, 0.5);
+  const g = x.createRadialGradient(0, 0, 0, 0, 0, 64);
+  g.addColorStop(0, 'rgba(255,240,214,.42)'); g.addColorStop(.42, 'rgba(255,234,204,.20)');
+  g.addColorStop(1, 'rgba(255,228,196,0)');
+  x.fillStyle = g; x.beginPath(); x.arc(0, 0, 64, 0, 7); x.fill(); x.restore();
+  return new THREE.CanvasTexture(cv);
+}
+const PLATE_TEX = plateTexture();
+function headTexture(){                                   // 前大灯：冷白，中心不烧穿
+  const cv = document.createElement('canvas'); cv.width = cv.height = 128;
+  const x = cv.getContext('2d');
+  const g = x.createRadialGradient(64,64,0,64,64,64);
+  g.addColorStop(0,   'rgba(238,246,255,.72)');
+  g.addColorStop(.30, 'rgba(214,232,255,.34)');
+  g.addColorStop(.62, 'rgba(180,210,255,.10)');
+  g.addColorStop(1,   'rgba(160,200,255,0)');
+  x.fillStyle = g; x.fillRect(0,0,128,128);
+  return new THREE.CanvasTexture(cv);
+}
+const HEAD_TEX = headTexture();
+let plateLamp = null;
+let brakeGlow = 0, tailSprites = [];
+
+// GPS 也没有刹车踏板信号，只能由减速度反推。
+// 注意：GPS 大约 1Hz 才更新一次，逐帧对车速求导会算出 +9.6 m/s² 这种不可能的值，
+// 所以改成固定 2.5s 窗口上做差分，并夹到物理合理范围。
+const AWIN = 2.5;
+let hist = [], aSmooth = 0;
+function updateBrake(dt){
+  if(dt <= 0) return;
+  const t = lastTs;
+  hist.push([t, D.speed]);
+  while(hist.length > 2 && t - hist[0][0] > AWIN) hist.shift();
+  const span = hist[hist.length-1][0] - hist[0][0];
+  if(span < 0.8) return;                                  // 窗口太短，别急着出数
+  const a = Math.max(-6, Math.min(6,
+    (hist[hist.length-1][1] - hist[0][1]) / 3.6 / (span/1000)));
+  aSmooth += (a - aSmooth) * Math.min(1, dt * 3);
+  const want = aSmooth < -0.5 ? Math.min(1, -aSmooth / 2.2) : 0;
+  brakeGlow += (want - brakeGlow) * Math.min(1, dt * (want > brakeGlow ? 10 : 3));
+}
+function applyTailGlow(){
+  const base = mq.matches ? 0.34 : 0;                  // 夜间示廓常亮，白天只跟刹车
+  const k = Math.min(1, base + brakeGlow);
+  // 白天必须单独收紧：加性混合叠在近白背景上会把红推成粉白，反而更像"放了两个太阳"。
+  // 真车白天看刹车灯也是小而饱和的红点，不是大光晕。
+  const peak = mq.matches ? 0.42 : 0.18, spread = mq.matches ? 1 : 0.78;
+  for(const sp of tailSprites){
+    sp.material.opacity = k > 0.02 ? 0.08 + peak * k : 0;   // 白天没刹车=全灭
+    const sc = (1.05 + 0.35 * k) * spread;                  // 夜间范围更大、强度更低
+    sp.scale.set(sc, sc * 0.9, 1);
+  }
+  for(const m of tailMats) m.emissiveIntensity = 0.85 * k;
+  const hlOn = mq.matches ? 1 : 0;                 // 夜间（含停车）前大灯常亮
+  for(const sp of headSprites) sp.material.opacity = hlOn;
+  window.__lights = { brake:+brakeGlow.toFixed(2), a:+aSmooth.toFixed(2), k:+k.toFixed(2) };
+}
+
+/* ---------- 环境反射 ---------- */
+// 车漆上的"太阳"是反射出来的，不是贴上去的高光：画一张天光渐变 + 一个亮圆，
+// 走 PMREM 生成环境贴图，MeshStandardMaterial 自己会把太阳反到车顶。
+function skyTexture(){
+  const cv = document.createElement('canvas'); cv.width = 512; cv.height = 256;
+  const x = cv.getContext('2d');
+  const g = x.createLinearGradient(0, 0, 0, 256);
+  g.addColorStop(0, '#dfe8f2'); g.addColorStop(.40, '#c2d0e0');
+  g.addColorStop(.50, '#93a0ad'); g.addColorStop(1, '#242a31');
+  x.fillStyle = g; x.fillRect(0, 0, 512, 256);
+  const sun = x.createRadialGradient(150, 52, 0, 150, 52, 21);   // 小而亮 = 一道高光
+  sun.addColorStop(0, 'rgba(255,255,255,1)');
+  sun.addColorStop(.45, 'rgba(255,250,235,.75)');
+  sun.addColorStop(1, 'rgba(255,244,220,0)');
+  x.fillStyle = sun; x.beginPath(); x.arc(150, 52, 21, 0, 7); x.fill();
+  const t = new THREE.Texture(cv);
+  t.mapping = THREE.EquirectangularReflectionMapping; t.needsUpdate = true;
+  return t;
+}
+const pmrem = new THREE.PMREMGenerator(renderer);
+scene.environment = pmrem.fromEquirectangular(skyTexture()).texture;
+pmrem.dispose();
+const carMats = [];                      // 收集车身材质，昼夜调节反射强度
+
+// 停车视角的"摄影棚地面"：大而素，靠雾把边缘化掉，避免看到路面尽头
+const floor = new THREE.Mesh(new THREE.PlaneGeometry(140, 140),
+  new THREE.MeshBasicMaterial({ color: s2l(0xd3dae3), transparent:true, opacity:0, depthWrite:false }));
+floor.rotation.x = -Math.PI/2; floor.position.y = -0.012; floor.renderOrder = 1;
+scene.add(floor);
+let mirrorRoot = null;
+
+/* ---------- 毛玻璃倒影 ---------- */
+// 倒影单独渲染到一张低分辨率离屏缓冲，再由地面四边形按屏幕坐标采样并做 3x3 高斯模糊。
+// 用 gl_FragCoord 而不是插值 clip 坐标：后者在大四边形上会插值错。
+const RT_W = 256, RT_H = 192;   // 故意低分辨率：放大采样时天然带一层柔化
+const rt = new THREE.WebGLRenderTarget(RT_W, RT_H, {
+  minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter, format: THREE.RGBAFormat });
+const reflMat = new THREE.ShaderMaterial({
+  transparent: true, depthWrite: false,
+  uniforms: { tMirror:{value:rt.texture}, uStrength:{value:0},
+              uTexel:{value:new THREE.Vector2(1/RT_W, 1/RT_H)},
+              uVp:{value:new THREE.Vector2(1,1)}, uBlur:{value:4.5} },
+  vertexShader: 'void main(){ gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }',
+  fragmentShader: [
+    'uniform sampler2D tMirror; uniform float uStrength, uBlur;',
+    'uniform vec2 uTexel, uVp; varying vec4 dummy;',
+    'void main(){',
+    '  vec2 suv = gl_FragCoord.xy / uVp;',
+    '  if(suv.x<0.0||suv.x>1.0||suv.y<0.0||suv.y>1.0) discard;',
+    '  vec2 o = uTexel * uBlur;',
+    '  vec4 c = texture2D(tMirror, suv+vec2(-o.x,-o.y))*0.0625',
+    '           + texture2D(tMirror, suv+vec2( 0.0 ,-o.y))*0.125',
+    '           + texture2D(tMirror, suv+vec2( o.x ,-o.y))*0.0625',
+    '           + texture2D(tMirror, suv+vec2(-o.x, 0.0 ))*0.125',
+    '           + texture2D(tMirror, suv)                  *0.25',
+    '           + texture2D(tMirror, suv+vec2( o.x , 0.0 ))*0.125',
+    '           + texture2D(tMirror, suv+vec2(-o.x, o.y ))*0.0625',
+    '           + texture2D(tMirror, suv+vec2( 0.0 , o.y ))*0.125',
+    '           + texture2D(tMirror, suv+vec2( o.x , o.y ))*0.0625;',
+    '  float a = c.a * uStrength;',
+    '  if(a < 0.004) discard;',
+    '  gl_FragColor = vec4(c.rgb, a);',
+    '}'].join('\n'),
+});
+const reflQuad = new THREE.Mesh(new THREE.PlaneGeometry(140, 140), reflMat);
+reflQuad.rotation.x = -Math.PI/2; reflQuad.position.y = -0.010;
+reflQuad.renderOrder = 2; reflQuad.visible = false;
+scene.add(reflQuad);
+
+/* ---------- 大灯光池 ---------- */
+// 相机在车后方，灯罩本身看不见；夜间"开大灯"能被看见的只有铺在路面上的光。
+function beamTexture(){
+  const cv = document.createElement('canvas'); cv.width = 64; cv.height = 256;
+  const x = cv.getContext('2d');
+  // 渐变末端(画布底部)对应贴近车头的一侧：实测反了会亮在远处
+  const g = x.createLinearGradient(0, 0, 0, 256);
+  g.addColorStop(0, 'rgba(255,247,222,0)');
+  g.addColorStop(.58, 'rgba(255,247,222,.34)');
+  g.addColorStop(1, 'rgba(255,247,222,.95)');
+  x.fillStyle = g; x.fillRect(0, 0, 64, 256);
+  const h = x.createLinearGradient(0, 0, 64, 0);           // 两侧羽化
+  h.addColorStop(0, 'rgba(0,0,0,.9)'); h.addColorStop(.5, 'rgba(0,0,0,0)'); h.addColorStop(1, 'rgba(0,0,0,.9)');
+  x.globalCompositeOperation = 'destination-out'; x.fillStyle = h; x.fillRect(0, 0, 64, 256);
+  return new THREE.CanvasTexture(cv);
+}
+const beamTex = beamTexture();
+for(const bx of [-0.55, 0.55]){
+  const b = new THREE.Mesh(new THREE.PlaneGeometry(1.6, 17),
+    new THREE.MeshBasicMaterial({ map:beamTex, transparent:true, opacity:0,
+                                  blending:THREE.AdditiveBlending, depthWrite:false, fog:false }));
+  b.rotation.x = -Math.PI/2;
+  b.position.set(bx, 0.02, -(Z_EGO + CAR_LEN + 8.5));      // 起点贴车头，往前 17m
+  scene.add(b); beams.push(b);
+}
+
+/* ---------- 车辆模型 ---------- */
+// 从内嵌 base64 构造 Blob URL，而不是 fetch .glb：file:// 下 XHR 取同目录文件会被拦
+function modelURL(){
+  const b64 = window.__FIESTA_GLB;
+  if(!b64) return null;
+  const bin = atob(b64), u8 = new Uint8Array(bin.length);
+  for(let i=0;i<bin.length;i++) u8[i] = bin.charCodeAt(i);
+  return URL.createObjectURL(new Blob([u8], { type:'model/gltf-binary' }));
+}
+
+new THREE.GLTFLoader().load(modelURL(), g => {
+  const obj = g.scene;
+  // 作者从 FBX 转出时留了 0.01 的节点缩放，实车 3.97m 会变成 4cm。
+  // 不写死倍率：按 Fiesta ST 真实车长把包围盒归一，作者用什么单位都能对上。
+  obj.updateMatrixWorld(true);
+  let box = new THREE.Box3().setFromObject(obj);
+  let size = box.getSize(new THREE.Vector3());
+  obj.scale.multiplyScalar(CAR_LEN / Math.max(size.x, size.z));
+  obj.updateMatrixWorld(true);
+  box = new THREE.Box3().setFromObject(obj);
+  size = box.getSize(new THREE.Vector3());
+  const ctr = box.getCenter(new THREE.Vector3());
+
+  // 尾灯：红色主导 + 位于车身两端（座椅也是红的，但在车厢中部，靠位置排除）。
+  // 只标记材质，强度交给 applyTheme，夜间才发光。
+  const halfLen = size.z/2; let tailBox = null;
+  const off = o => { const b = new THREE.Box3().setFromObject(o); return (b.min.z+b.max.z)/2 - ctr.z; };
+  // 灯罩材质是和别的部件共用的（红色尾灯材质 = 红色座椅，白色灯罩材质 = 车尾徽标）。
+  // 直接改材质会让座椅和徽标一起发光，所以只给命中的 mesh 换一份克隆材质。
+  function glowOn(o, m, hex){
+    const cm = m.clone();
+    cm.emissive = new THREE.Color(hex); cm.emissiveIntensity = 0;
+    const ms = [].concat(o.material); ms[ms.indexOf(m)] = cm;
+    o.material = ms.length === 1 ? cm : ms;
+    return cm;
+  }
+  // 车漆：原模型是近乎黑的深藏蓝(baseColorFactor 0,0.021,0.222)，调浅并压低粗糙度
+  // 让太阳反光拉得出来。同样只改克隆体，不动共享材质。
+  function lighten(o, m){
+    const cm = m.clone();
+    // 粗糙度保持模型原值(0.08)：正是这份镜面度让太阳反成一条高光而不是糊成一层。
+    // 金属度拉高 + 反射加强 = 深色漆在高光处显出蓝底，而不是整块死黑。
+    cm.color.setHex(PAINT); cm.metalness = Math.max(cm.metalness, 0.88);
+    cm.envMapIntensity = SHEEN_DAY;
+    const ms = [].concat(o.material); ms[ms.indexOf(m)] = cm;
+    o.material = ms.length === 1 ? cm : ms;
+    return cm;
+  }
+  obj.traverse(o => {
+    if(!o.isMesh) return;
+    for(const m of [].concat(o.material)){
+      const c = m && m.color;
+      if(!c) continue;
+      if(c.b > 1.8*Math.max(c.r, c.g)){ paintMats.push(lighten(o, m)); continue; }  // 蓝色主导 = 车漆
+      carMats.push(m);
+      if(!(c.r > 1.8*Math.max(c.g, c.b))) continue;
+      const z = off(o);
+      if(Math.abs(z) > halfLen*0.72){
+        tailMats.push(glowOn(o, m, 0xff2d1a)); rearSign = Math.sign(z);
+        tailBox = new THREE.Box3().setFromObject(o);          // 记住灯的实际位置
+      }
+    }
+  });
+  obj.position.set(-ctr.x, -box.min.y, -ctr.z);           // 居中 + 落地
+
+  const car = new THREE.Group(); car.add(obj);
+  if(tailBox){
+    const plateY = (tailBox.min.y + tailBox.max.y)/2 - 0.02 + obj.position.y;   // 灯在牌子上方往下照
+    const plate = new THREE.Sprite(new THREE.SpriteMaterial({ map: PLATE_TEX, transparent:true,
+      blending: THREE.AdditiveBlending, depthWrite:false, opacity:0 }));
+    // 车组绕 Y 转了 180°，局部 +z 反而朝远离相机的方向：必须是减，
+    // 加 0.02 会把光晕推到钣金后面被深度测试吃掉（之前就是看不见的原因）
+    plate.position.set(obj.position.x, plateY, tailBox.min.z + obj.position.z - 0.14);
+    plate.scale.set(0.86, 0.40, 1);
+    car.add(plate); plateLamp = plate;
+  }
+  // 大灯灯罩在这个模型里不是独立 mesh（车头半段只有车标和一个小贴片），
+  // 所以不能靠改材质点亮 —— 实测那样会把轮胎照白。改用灯位精灵。
+  // 灯位是用硬边标记方块在 3/4 前视里标定出来的（不是按实车尺寸估的）：
+  // 方块压住圆形透镜、远侧落在灯外缘时，位置才算对。
+  for(const hx of [-0.66, 0.66]){
+    const hs = new THREE.Sprite(new THREE.SpriteMaterial({ map: HEAD_TEX, transparent:true,
+      blending: THREE.AdditiveBlending, depthWrite:false, opacity:0 }));
+    // 要放在车头表面往外一点：往里 10cm 会被鼻锥挡住，从前方看就是灯不亮
+    hs.position.set(hx, 0.80, halfLen - 0.16);
+    hs.scale.set(0.82, 0.40, 1);
+    car.add(hs); headSprites.push(hs);
+  }
+  if(tailBox){                                                 // 光晕贴在灯罩两端
+    const y = (tailBox.min.y + tailBox.max.y)/2 + obj.position.y;
+    for(const x of [tailBox.min.x, tailBox.max.x]){
+      const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTex, transparent:true,
+        blending: THREE.AdditiveBlending, depthWrite:false, opacity:0 }));
+      sp.position.set(x + obj.position.x, y, tailBox.min.z + obj.position.z);
+      car.add(sp); tailSprites.push(sp);
+    }
+  }
+  car.rotation.y = CAR_YAW;
+  car.position.set(0, 0, -(Z_EGO + size.z/2));            // 车尾对齐 Z_EGO
+  scene.add(car);
+  // 倒影 = 把车组镜像到地面以下。clone() 默认共享材质，必须逐个 clone 材质，
+  // 否则改倒影的透明度会把真车一起改透明。
+  mirrorRoot = new THREE.Group();
+  const mir = car.clone(true);
+  mir.traverse(o => {
+    o.renderOrder = 2;
+    if(o.isSprite){ o.visible = false; return; }        // 灯晕不参与倒影
+    if(!o.isMesh) return;
+    const ms = [].concat(o.material).map(m => {
+      const cm = m.clone();
+      cm.transparent = true; cm.opacity = 1.0;   // 离屏通道里要的是纯覆盖度，强度由着色器决定
+      // 深度测试和写入都要开着：关掉会让镜像的远面穿过近面，倒影变成 X 光片。
+      // 地板是 depthWrite:false 且不写深度，所以不会把倒影挡掉。
+      cm.depthWrite = true; cm.depthTest = true;
+      cm.side = THREE.DoubleSide;                       // Y 翻转后绕序反了，否则面会被剔掉
+      return cm;
+    });
+    o.material = ms.length === 1 ? ms[0] : ms;
+    ms.forEach(m => mir2fade.push(m));
+  });
+  mirrorRoot.scale.set(1, -0.55, 1);
+  mirrorRoot.add(mir);
+  scene.add(mirrorRoot);
+  mirrorRoot.visible = false;        // 只作为离屏烘源，不直接参与主通道
+
+  carCenter.set(0, size.y*0.5, -(Z_EGO + size.z/2));
+  window.__car = { size, tailMats: tailMats.length, rearSign, halfLen:+halfLen.toFixed(2) };
+
+  applyTheme();                      // 模型是异步来的，首帧那次 applyTheme 里还没有尾灯材质
+  document.getElementById('load').className = 'hidden';
+  console.info('Fiesta 就绪：' + size.z.toFixed(2) + 'm 长 × ' + size.x.toFixed(2) + 'm 宽 × ' + size.y.toFixed(2) + 'm 高，尾灯发光材质 ' + tailMats.length + ' 个');
+}, undefined,
+e => {
+  const el=document.getElementById('load');
+  el.className='bad'; el.textContent='模型加载失败：'+(e && e.message || e);
+});
+
+/* ---------- 昼夜主题 ---------- */
+const mq = matchMedia('(prefers-color-scheme: dark)');
+function applyTheme(){
+  const t = mq.matches ? THEME.dark : THEME.light;
+  scene.background.setHex(t.sky);
+  scene.fog.color.copy(s2l(t.sky));
+  for(const k of ['road','shoulder','edge'])
+    for(const m of (ground[k]||[])) m.material.color.copy(s2l(t[k]));
+  floor.material.color.copy(s2l(t.floor));   // 摄影棚地面也要跟着昼夜，否则黑夜配白地
+  dashMat.color.copy(s2l(t.dash));
+  TH = t; themeK = mq.matches ? 0.42 : 1; hemi.groundColor.setHex(t.ground);
+  applyLighting();
+  for(const b of beams) b.material.opacity = t.beam;           // 夜间路面光池
+  if(plateLamp) plateLamp.material.opacity = mq.matches ? 0.55 : 0.08;   // 车牌灯随示廓
+  // 只有车漆吃强光泽；玻璃、黑色饰件、徽标保持常规反射，否则会一起发亮
+  for(const m of carMats) if(m.envMapIntensity !== undefined) m.envMapIntensity = mq.matches ? 0.18 : 0.7;
+  for(const m of paintMats) m.envMapIntensity = mq.matches ? SHEEN_NIGHT : SHEEN_DAY;
+}
+mq.addEventListener ? mq.addEventListener('change', applyTheme) : mq.addListener(applyTheme);
+
+let vw = 0, vh = 0;
+function resize(){
+  const w = innerWidth, h = innerHeight;
+  if(!w || !h || (w===vw && h===vh)) return;
+  vw = w; vh = h;
+  camera.aspect = w/h; camera.updateProjectionMatrix();
+  // 必须让 three 同时更新 canvas 的 CSS 尺寸：传 false 时 Retina(dpr=2) 上
+  // canvas 会按绘制缓冲尺寸排版，整个画面放大一倍，车直接被挤出视窗外
+  renderer.setSize(w, h);
+}
+resize();
+
+const mir2fade = [];
+// 标线/路肩/边线在停车视角要淡出（用户不想要"斑马线"），换成素地面
+const decor = [...ground.road, ...ground.shoulder, ...ground.edge];
+function updateFade(){
+  const e = ease(clamp01(CAM.k)), inv = 1 - e;
+  applyLighting();   // 转场中 CAM.k 每帧在变，灯光必须跟着插值
+  for(const m of decor) m.material.opacity = e;
+  dashMat.opacity = e;
+  floor.material.opacity = 0.95 * inv;
+  floor.visible = inv > 0.02;
+  const showRefl = !!mirrorRoot && inv > 0.05;
+  reflQuad.visible = showRefl;
+  // 夜间深色地面更像抛光面，反射反而更强
+  reflMat.uniforms.uStrength.value = 0.22 * inv * (mq.matches ? 1.2 : 1);
+}
+
+
+/* ---------- 读数 ---------- */
+let tripKm = 0, lastTs = 0, wasDark = null;
+document.getElementById('trip').onclick = ()=>{ tripKm = 0; };
+const COMPASS = ['北','东北','东','东南','南','西南','西','西北'];
+function paint(){
+  document.getElementById('speed').textContent = Math.round(shown.speed);
+  document.getElementById('vTrip').textContent = tripKm.toFixed(1);
+
+  document.getElementById('vAcc').textContent  = (aSmooth>=0?'+':'') + aSmooth.toFixed(1);
+  document.getElementById('cAcc').className = 'card'+(aSmooth<-1.5?' warn':'');
+  document.getElementById('vAvg').textContent  = tripKm>0.05 && G.movingSec>20
+    ? (tripKm/(G.movingSec/3600)).toFixed(0) : '—';
+  const acc = G.acc;
+  document.getElementById('vPrec').textContent = acc===null ? '—' : acc.toFixed(0)+'m';
+  document.getElementById('cPrec').className = 'card'+(acc===null?'':acc>30?' bad':acc>15?' warn':'');
+  document.getElementById('vHead').textContent = G.head===null ? '—'
+    : G.head.toFixed(0)+'° '+COMPASS[Math.round((G.head%360)/45)%8];
+
+  const st = (!D.connected || CAM.mode==='park') ? 'P' : (shown.speed<2 ? 'N' : 'D');
+  document.querySelectorAll('#gearrow i').forEach(i=>i.classList.toggle('dim', i.dataset.g!==st));
+  document.getElementById('ready').textContent = D.connected?'READY':'OFF';
+  document.getElementById('ready').className   = D.connected?'':'off';
+  document.getElementById('dot').className     = 'dot '+(D.connected?'on':'off');
+  document.getElementById('conn').textContent  = D.connected?GPS_LABEL:'GPS 未定位';
+  document.getElementById('lampFix').className = 'lamp'+(D.connected?' on':' bad');
+  document.getElementById('lampFix').lastChild.textContent = D.connected?'已定位':'等待定位';
+  document.getElementById('lampAcc').className = 'lamp'+(acc===null?'':acc>30?' bad':' on');
+  document.getElementById('lampAcc').lastChild.textContent = '精度 '+(acc===null?'未知':acc.toFixed(0)+'m');
+  document.getElementById('lampSrc').lastChild.textContent = '速度来源 '+G.src;
+}
+
+function loop(ts){
+  const dt = lastTs ? Math.min((ts-lastTs)/1000, 1) : 0;   // 上限 1s，防后台回来灌虚假里程
+  lastTs = ts;
+  resize();                                                 // 转屏 / 0x0 启动都能自愈
+  const isDark = mq.matches;
+  if(isDark !== wasDark){ wasDark = isDark; applyTheme(); }
+  shown.speed += (D.speed - shown.speed) * 0.18;   // GPS 速度跳变大，这层平滑是必要的
+  // 起步立刻转场到驾驶视角；停稳 6s 才回到环绕视角，避免每个红灯都切
+  if(shown.speed > 3){ CAM.mode = 'drive'; CAM.stopped = 0; }
+  else if(shown.speed < 0.5){ if((CAM.stopped += dt) > 6){ CAM.mode='park'; } }
+  else CAM.stopped = 0;
+  if(CAM.mode !== lastMode){ lastMode = CAM.mode; updateHint(); }
+  updateCamera(dt); updateFade();
+  if(D.connected){
+    updateBrake(dt); applyTailGlow();
+    if(shown.speed > 2) G.movingSec += dt;            // 里程走位移积分，这里只累计行驶时长
+    const dz = shown.speed/3.6*dt;
+    for(const m of dashes){ m.position.z += dz; if(m.position.z > 8) m.position.z -= 44*7.5; }
+  }
+  paint();
+  renderFrame();
+  requestAnimationFrame(loop);
+}
+
+function renderFrame(){
+  // 几何镜像只用于烘进离屏 RT，主通道里必须一直藏着，否则它会和模糊四边形叠加，
+  // 看到的是那个没模糊的"第二台车"。
+  if(reflQuad.visible && mirrorRoot){
+    const stash = [];
+    scene.children.forEach(o => {
+      if(o.isLight) return;
+      stash.push([o, o.visible]);
+      o.visible = (o === mirrorRoot);
+    });
+    const bg = scene.background; scene.background = null;      // RT 要透明底，alpha 即覆盖度
+    renderer.setRenderTarget(rt);
+    renderer.setClearColor(0x000000, 0); renderer.clear();
+    renderer.render(scene, camera);
+    renderer.setRenderTarget(null);
+    scene.background = bg;
+    stash.forEach(([o,v]) => o.visible = v);
+    if(mirrorRoot) mirrorRoot.visible = false;
+  }
+  reflMat.uniforms.uVp.value.set(renderer.domElement.width, renderer.domElement.height);
+  renderer.render(scene, camera);
+}
+
+/* ---------- GPS 数据源 ---------- */
+// GPS 能给的：速度、位置、精度、航向、高度。
+// GPS 给不了的（转速/水温/电压/节气门/故障灯）本版一律不显示。
+let GPS_LABEL = 'GPS 已定位', demoGps = true;
+const R_E = 6371000;
+function hav(lat1, lon1, lat2, lon2){                 // 大圆距离(米)
+  const r = Math.PI/180;
+  const dLat = (lat2-lat1)*r, dLon = (lon2-lon1)*r;
+  const a = Math.sin(dLat/2)**2 +
+            Math.cos(lat1*r)*Math.cos(lat2*r)*Math.sin(dLon/2)**2;
+  return 2*R_E*Math.asin(Math.min(1, Math.sqrt(a)));
+}
+function ingest(lat, lon, speedMs, acc, head, ts){
+  G.acc = acc; G.head = head;
+  let v = null;
+  if(speedMs !== null && speedMs !== undefined) v = Math.abs(speedMs)*3.6;
+
+  if(G.lat !== null){
+    const d = hav(G.lat, G.lon, lat, lon);
+    const dt = (ts - G.posTs)/1000;
+    // 位移推算兜底：Wi-Fi 定位或静止时 coords.speed 是 null
+    if(v === null && dt > 0.25 && d < 400) v = d/dt*3.6;
+    if(d > 1.5 && d < 300) tripKm += d/1000;          // 丢掉抖动和跳点再计入里程
+  }
+  if(v === null){ v = D.speed; G.src = '无速度'; }
+  else G.src = speedMs==null ? '位移推算' : 'GPS 速度';
+  D.speed = Math.max(0, Math.min(220, v));
+  G.lat = lat; G.lon = lon; G.posTs = ts;
+  if(!D.connected){ D.connected = true; refreshWeather(); }   // 第一个定位点一到就刷新天气
+}
+
+/* 真实 GPS：蜂窝/带定位芯片的 iPad 才有 coords.speed；
+   纯 Wi-Fi 版会是 null，此时自动退化成上面的位移推算（更抖但能用）。 */
+let watchId = null;
+function startRealGps(){
+  if(!navigator.geolocation) return false;
+  GPS_LABEL = 'GPS 已定位';
+  watchId = navigator.geolocation.watchPosition(p=>{
+    const c = p.coords;
+    ingest(c.latitude, c.longitude, c.speed, c.accuracy,
+           c.heading===undefined?null:c.heading, p.timestamp||performance.now());
+  }, ()=>{ D.connected = false; }, { enableHighAccuracy:true, maximumAge:0, timeout:20000 });
+  return true;
+}
+
+/* 演示：按 1Hz 生成定位点（真实 GPS 的更新率就是这个量级），
+   静止时 speed 给 null，逼出位移推算那条路。 */
+(function demoGps(){
+  if(!demoGps) return;
+  GPS_LABEL = '演示轨迹（模拟 GPS）';
+  const cycle=[0,8,14,22,38,52,64,78,88,96,88,72,55,38,24,12,0];
+  const PARKED=6;                                      // 前几拍静止：展示环绕视角与起步转场
+  let n=0, lat=14.5995, lon=121.0210, hdg=35;
+  setInterval(()=>{
+    const f=((n++)%40)/40*cycle.length, i=Math.floor(f), k=f-i;
+    const s = n < PARKED ? 0 : cycle[i]+(cycle[(i+1)%cycle.length]-cycle[i])*k;
+    const ms = s/3.6, dtSec = 1;
+    hdg = (hdg + (s>10? 1.6:0)) % 360;
+    const d = ms*dtSec;
+    lat += (d*Math.cos(hdg*Math.PI/180))/111320;
+    lon += (d*Math.sin(hdg*Math.PI/180))/(111320*Math.cos(lat*Math.PI/180));
+    ingest(lat, lon, n<PARKED ? null : ms, 6 + (n%3)*3, hdg, performance.now());
+  }, 1000);
+})();
+if(!startRealGps()) demoGps = true;                     // 没有 geolocation 就留在演示
+
+/* ---------- 日期 / 时间 / 天气 ---------- */
+let wxLast = null;
+function tickClock(){
+  const n = new Date();
+  document.getElementById('clkTime').textContent =
+    String(n.getHours()).padStart(2,'0') + ':' + String(n.getMinutes()).padStart(2,'0');
+  document.getElementById('clkDate').textContent =
+    n.toLocaleDateString('zh-CN', { month:'long', day:'numeric', weekday:'long' });
+}
+tickClock(); setInterval(tickClock, 15000);
+
+const WMO = { 0:'晴', 1:'大致晴', 2:'局部多云', 3:'阴', 45:'雾', 48:'雾凇', 51:'毛毛雨', 53:'毛毛雨',
+  55:'冻毛毛雨', 61:'小雨', 63:'中雨', 65:'大雨', 66:'冻雨', 67:'强冻雨', 71:'小雪', 73:'中雪',
+  75:'大雪', 77:'米雪', 80:'阵雨', 81:'强阵雨', 82:'暴雨', 85:'阵雪', 86:'强阵雪',
+  95:'雷暴', 96:'雷暴伴冰雹', 99:'强雷暴伴冰雹' };
+// 定位失败/被拒时的兜底：用户在马尼拉
+const FALLBACK = { lat:14.5995, lon:120.9842 };
+const wxEl = document.getElementById('wx');
+function loadWeather(lat, lon){
+  wxLast = [lat, lon];
+  fetch('https://api.open-meteo.com/v1/forecast?latitude=' + (+lat).toFixed(4) +
+        '&longitude=' + (+lon).toFixed(4) + '&current=temperature_2m,weather_code&timezone=auto')
+    .then(r => { if(!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+    .then(j => {
+      const c = j.current || {};
+      wxEl.textContent = Math.round(c.temperature_2m) + '° ' + (WMO[c.weather_code] || '');
+      wxEl.className = '';
+    })
+    .catch(() => { wxEl.textContent = '天气不可用'; wxEl.className = 'bad'; });
+}
+// GPS 版：位置由上面的 watchPosition 提供，避免重复申请定位权限
+function refreshWeather(){
+  if(G.lat !== null) loadWeather(G.lat, G.lon);
+  else if(wxLast === null) loadWeather(FALLBACK.lat, FALLBACK.lon);
+}
+refreshWeather();                       // 启动先取一次，否则要等 15 分钟
+setInterval(refreshWeather, 15 * 60 * 1000);
+
+D.connected = true;
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>
