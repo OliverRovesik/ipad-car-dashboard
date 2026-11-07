@@ -314,7 +314,17 @@ function dumpDiag(){                                      // 没有 Raw JSON 按
 
 /* ---------- Mapbox 真实路线 ---------- */
 const TK='car_mapbox_token';
-function tokOf(){ return localStorage.getItem(TK)||''; }
+let memTok='';                                           // Safari 无痕模式下 localStorage 会抛，兜底用
+function lsSet(v){ memTok=v; try{ v?localStorage.setItem(TK,v):localStorage.removeItem(TK); }catch(e){} }
+function lsGet(){ try{ return localStorage.getItem(TK)||memTok; }catch(e){ return memTok; } }
+// change 只在失焦时才触发，而 iPad 上直接点 Go 常常是按钮先跑、输入框还没失焦 ——
+// 所以读 token 时必须把输入框里现成的值也算上，否则会报"还没填 token"但其实填了。
+function tokOf(){ return lsGet() || ($('#tok')?$('#tok').value.trim():''); }
+function adoptToken(){
+  const v=$('#tok') ? $('#tok').value.trim() : '';
+  if(v){ lsSet(v); $('#tok').value=''; tkState(); }
+  return tokOf();
+}
 function tkState(){
   const t=tokOf();
   $('#tok').style.display = t ? 'none' : '';
@@ -323,8 +333,8 @@ function tkState(){
 // 只存这台设备：改完或回车即保存，存好之后这一行自己收起
 $('#tok').addEventListener('change',e=>{
   const v=e.target.value.trim();
-  if(v) localStorage.setItem(TK,v); else localStorage.removeItem(TK);
-  e.target.value=''; tkState(); toast(v?'Token saved on this device only':'Token cleared');
+  lsSet(v); e.target.value=''; tkState();
+  toast(v?'Token saved on this device only':'Token cleared');
 });
 $('#tok').addEventListener('keydown',e=>{ if(e.key==='Enter') e.target.blur(); });
 tkState();
@@ -407,7 +417,7 @@ async function geo(q, near){
           matched:f.properties.name, placeType:f.properties['mapbox_id']||''};
 }
 async function go(dstText){
-  if(!tokOf()){ toast('Enter a Mapbox public token first'); return; }
+  if(!adoptToken()){ toast('Enter a Mapbox public token first'); return; }
   toast('Routing…');
   $('#sug').classList.remove('show');
   try{
@@ -565,7 +575,7 @@ function useDot(why,quiet){
 function initGL(){
   if(gl){ glReady=true; drawGL(); return true; }   // 已存在也必须重画，否则换目的地路线不更新
   if(!window.mapboxgl){ toast('mapbox-gl.js did not load'); return false; }
-  if(!tokOf()){ toast('Enter a token first'); return false; }
+  if(!adoptToken()){ toast('Enter a token first'); return false; }
   // 顺序很关键：先让容器有尺寸，再 new Map()。反过来做的话 Mapbox 按 0×0 算出 canvas，
   // 结果就是地图只占左上角一小块且不会自己长大。
   $('#glmap').style.display='block'; $('#sketch').style.display='none'; $('#mapImg').style.display='none';
