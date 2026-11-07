@@ -9,8 +9,10 @@
 <!--
   三维依赖与素材
   - three.min.js / GLTFLoader.js  r128, MIT (c) 2010-2021 three.js authors，本地副本，无 CDN 依赖
-  - model/fiesta.glb  "2013 Ford Fiesta ST" by Ddiaz Design, https://sketchfab.com/ddiaz-design
+  - model/fiesta.data.js  内嵌的 "2013 Ford Fiesta ST" 模型(base64)，原文件不在仓库里。
+    作者 Ddiaz Design, https://sketchfab.com/ddiaz-design
     授权 CC-BY-NC-SA-4.0 —— 署名 + 非商业 + 相同方式共享。再分发时须保留本注释。
+    换模型时从 .glb 重新生成：见 model/fiesta.data.js 文件头的一行命令。
 -->
 <style>
   :root{
@@ -140,8 +142,9 @@ const THEME = {
   dark: { sky:0x0e1216, road:0x1b2129, shoulder:0x151b22, edge:0x2a333f, dash:0x465262,
           hemi:0.34, sun:0.24, ground:0x0c1014, beam:0.85 },
 };
-let tailMats = [], rearSign = 0, beams = [];
-const PAINT = 0x22579f;                // 车漆：原模型是近黑的深藏蓝(0,5,56)，这里浅一档；想再浅改这里
+let tailMats = [], rearSign = 0, beams = [], paintMats = [];
+const SHEEN_DAY = 1.75, SHEEN_NIGHT = 0.46;   // 车漆反射强度
+const PAINT = 0x020c41;                // 车漆：1号(#000538) 与 2号(#04144a) 的正中间；发黑主要靠光泽解决
 
 let renderer, scene, camera, dashes = [];
 try{
@@ -196,12 +199,14 @@ for(const lx of [-LANE/2-0.05, LANE/2+0.05])
 function glowTexture(){
   const cv = document.createElement('canvas'); cv.width = cv.height = 128;
   const x = cv.getContext('2d');
+  // 氛围灯式衰减：中心不给白热芯（加性混合下白芯会烧成"两个太阳"），
+  // 而是直接从半亮红起步，再缓慢铺开
   const g = x.createRadialGradient(64, 64, 0, 64, 64, 64);
-  g.addColorStop(0,   'rgba(255,205,185,1)');     // 炽热灯芯
-  g.addColorStop(.18, 'rgba(255,96,66,.85)');
-  g.addColorStop(.45, 'rgba(226,36,24,.34)');
-  g.addColorStop(.75, 'rgba(190,10,10,.10)');
-  g.addColorStop(1,   'rgba(170,0,0,0)');
+  g.addColorStop(0,   'rgba(255,62,44,.50)');
+  g.addColorStop(.22, 'rgba(230,30,26,.38)');
+  g.addColorStop(.50, 'rgba(192,14,18,.20)');
+  g.addColorStop(.76, 'rgba(150,6,14,.07)');
+  g.addColorStop(1,   'rgba(140,0,16,0)');
   x.fillStyle = g; x.fillRect(0, 0, 128, 128);
   return new THREE.CanvasTexture(cv);
 }
@@ -211,8 +216,8 @@ function plateTexture(){                                   // 车牌灯：暖白
   const x = cv.getContext('2d');
   x.save(); x.translate(64,64); x.scale(1, 0.5);
   const g = x.createRadialGradient(0, 0, 0, 0, 0, 64);
-  g.addColorStop(0, 'rgba(255,246,222,.95)'); g.addColorStop(.45, 'rgba(255,238,200,.4)');
-  g.addColorStop(1, 'rgba(255,230,190,0)');
+  g.addColorStop(0, 'rgba(255,240,214,.42)'); g.addColorStop(.42, 'rgba(255,234,204,.20)');
+  g.addColorStop(1, 'rgba(255,228,196,0)');
   x.fillStyle = g; x.beginPath(); x.arc(0, 0, 64, 0, 7); x.fill(); x.restore();
   return new THREE.CanvasTexture(cv);
 }
@@ -234,14 +239,17 @@ function updateBrake(dt){
   brakeGlow += (want - brakeGlow) * Math.min(1, dt * (want > brakeGlow ? 14 : 4));
 }
 function applyTailGlow(){
-  const base = mq.matches ? 0.42 : 0;                  // 夜间示廓常亮，白天只跟刹车
+  const base = mq.matches ? 0.34 : 0;                  // 夜间示廓常亮，白天只跟刹车
   const k = Math.min(1, base + brakeGlow);
+  // 白天必须单独收紧：加性混合叠在近白背景上会把红推成粉白，反而更像"放了两个太阳"。
+  // 真车白天看刹车灯也是小而饱和的红点，不是大光晕。
+  const peak = mq.matches ? 0.42 : 0.18, spread = mq.matches ? 1 : 0.78;
   for(const sp of tailSprites){
-    sp.material.opacity = k > 0.02 ? 0.18 + 0.82 * k : 0;   // 白天没刹车 = 全灭
-    const sc = 0.62 + 0.5 * k;
-    sp.scale.set(sc, sc * 0.86, 1);
+    sp.material.opacity = k > 0.02 ? 0.08 + peak * k : 0;   // 白天没刹车=全灭
+    const sc = (1.05 + 0.35 * k) * spread;                  // 夜间范围更大、强度更低
+    sp.scale.set(sc, sc * 0.9, 1);
   }
-  for(const m of tailMats) m.emissiveIntensity = 2.2 * k;
+  for(const m of tailMats) m.emissiveIntensity = 0.85 * k;
   window.__lights = { brake:+brakeGlow.toFixed(2), a:+aSmooth.toFixed(2), k:+k.toFixed(2) };
 }
 
@@ -335,8 +343,10 @@ new THREE.GLTFLoader().load(modelURL(), g => {
   // 让太阳反光拉得出来。同样只改克隆体，不动共享材质。
   function lighten(o, m){
     const cm = m.clone();
-    cm.color.setHex(PAINT); cm.roughness = Math.min(cm.roughness, 0.32);
-    cm.metalness = Math.max(cm.metalness, 0.62); cm.envMapIntensity = 0.7;
+    // 粗糙度保持模型原值(0.08)：正是这份镜面度让太阳反成一条高光而不是糊成一层。
+    // 金属度拉高 + 反射加强 = 深色漆在高光处显出蓝底，而不是整块死黑。
+    cm.color.setHex(PAINT); cm.metalness = Math.max(cm.metalness, 0.88);
+    cm.envMapIntensity = SHEEN_DAY;
     const ms = [].concat(o.material); ms[ms.indexOf(m)] = cm;
     o.material = ms.length === 1 ? cm : ms;
     return cm;
@@ -346,7 +356,7 @@ new THREE.GLTFLoader().load(modelURL(), g => {
     for(const m of [].concat(o.material)){
       const c = m && m.color;
       if(!c) continue;
-      if(c.b > 1.8*Math.max(c.r, c.g)){ carMats.push(lighten(o, m)); continue; }  // 蓝色主导 = 车漆
+      if(c.b > 1.8*Math.max(c.r, c.g)){ paintMats.push(lighten(o, m)); continue; }  // 蓝色主导 = 车漆
       carMats.push(m);
       if(!(c.r > 1.8*Math.max(c.g, c.b))) continue;
       const z = off(o);
@@ -363,11 +373,13 @@ new THREE.GLTFLoader().load(modelURL(), g => {
 
   const car = new THREE.Group(); car.add(obj);
   if(tailBox){
-    const plateY = (tailBox.min.y + tailBox.max.y)/2 - 0.20 + obj.position.y;
+    const plateY = (tailBox.min.y + tailBox.max.y)/2 - 0.02 + obj.position.y;   // 灯在牌子上方往下照
     const plate = new THREE.Sprite(new THREE.SpriteMaterial({ map: PLATE_TEX, transparent:true,
       blending: THREE.AdditiveBlending, depthWrite:false, opacity:0 }));
-    plate.position.set(obj.position.x, plateY, tailBox.min.z + obj.position.z + 0.02);
-    plate.scale.set(0.62, 0.30, 1);
+    // 车组绕 Y 转了 180°，局部 +z 反而朝远离相机的方向：必须是减，
+    // 加 0.02 会把光晕推到钣金后面被深度测试吃掉（之前就是看不见的原因）
+    plate.position.set(obj.position.x, plateY, tailBox.min.z + obj.position.z - 0.14);
+    plate.scale.set(0.86, 0.40, 1);
     car.add(plate); plateLamp = plate;
   }
   if(tailBox){                                                 // 光晕贴在灯罩两端
@@ -405,9 +417,10 @@ function applyTheme(){
   hemi.intensity = t.hemi; hemi.groundColor.setHex(t.ground);
   sun.intensity = t.sun;
   for(const b of beams) b.material.opacity = t.beam;           // 夜间路面光池
-  if(plateLamp) plateLamp.material.opacity = mq.matches ? 0.85 : 0.12;   // 车牌灯随示廓
-  for(const m of carMats) if(m.envMapIntensity !== undefined)
-    m.envMapIntensity = mq.matches ? 0.18 : 0.7;               // 夜间反射压暗
+  if(plateLamp) plateLamp.material.opacity = mq.matches ? 0.55 : 0.08;   // 车牌灯随示廓
+  // 只有车漆吃强光泽；玻璃、黑色饰件、徽标保持常规反射，否则会一起发亮
+  for(const m of carMats) if(m.envMapIntensity !== undefined) m.envMapIntensity = mq.matches ? 0.18 : 0.7;
+  for(const m of paintMats) m.envMapIntensity = mq.matches ? SHEEN_NIGHT : SHEEN_DAY;
 }
 mq.addEventListener ? mq.addEventListener('change', applyTheme) : mq.addListener(applyTheme);
 
