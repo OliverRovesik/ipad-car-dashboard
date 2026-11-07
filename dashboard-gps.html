@@ -383,7 +383,156 @@ function applyTailGlow(){
   window.__lights = { brake:+brakeGlow.toFixed(2), a:+aSmooth.toFixed(2), k:+k.toFixed(2) };
 }
 
-/* ---------- 环境反射 ---------- */
+/* ---------- 车内乘客：毛绒兔 + 贴纸脸棉花糖 ---------- */
+// 车组绕 Y 转了 180°，所以局部 +X 是驾驶侧（菲律宾左舵）、局部 +Z 是车头。
+// 乘客正常坐姿朝车头、略向内偏；跟车视角在车后，看到的是背影。
+const RIDERS = [
+  {kind:'mallow', x: 0.36, y:0.72, z:0.30, yaw: -0.30, scale:2.2},
+  {kind:'bunny',  x:-0.36, y:0.50, z:0.30, yaw:  0.30, scale:1.7},
+];
+const RIDER_SCALE = 1.0;
+// 调试开关都走网址 hash，可以叠着用：#park-mark-ghost-xray
+// hash 在无头/自动化浏览器里会被丢掉，所以 query 也认：?probe=1
+const DBG = location.hash + location.search;
+const FORCE_PARK = /park/.test(DBG);    // 锁在环绕视角，方便标定
+const MARK_RIDERS = /mark/.test(DBG);   // 画出乘客落座基准块
+const GHOST_RIDERS = /ghost/.test(DBG); // 乘客忽略深度：区分"被车顶挡住"和"根本没画出来"
+const XRAY = /xray/.test(DBG);          // 车身半透，用来看座位到底在哪
+const PROBE_RIDERS = /probe/.test(DBG); // 从跟车相机打射线，报告乘客被谁挡住
+
+function plushTex(top, bottom){          // 毛绒渐变：canvas 顶边对应球体 UV v=1（北极）
+  const c = document.createElement('canvas'); c.width = c.height = 64;
+  const x = c.getContext('2d'), g = x.createLinearGradient(0,0,0,64);
+  g.addColorStop(0, top); g.addColorStop(1, bottom);
+  x.fillStyle = g; x.fillRect(0,0,64,64);
+  const t = new THREE.CanvasTexture(c); t.encoding = THREE.sRGBEncoding; return t;
+}
+function faceTex(){                      // 贴纸风脸：粗描边 + 平涂，本身不吃光照
+  const S = 256, c = document.createElement('canvas'); c.width = c.height = S;
+  const x = c.getContext('2d');
+  x.fillStyle = '#22242c';
+  for(const ex of [86,170]){ x.beginPath(); x.ellipse(ex,112,15,19,0,0,Math.PI*2); x.fill(); }
+  x.fillStyle = '#ffffff';
+  for(const ex of [81,165]){ x.beginPath(); x.ellipse(ex,105,5,6,0,0,Math.PI*2); x.fill(); }
+  x.fillStyle = 'rgba(255,146,172,.6)';
+  for(const bx of [56,200]){ x.beginPath(); x.ellipse(bx,146,21,12,0,0,Math.PI*2); x.fill(); }
+  x.strokeStyle = '#22242c'; x.lineWidth = 9; x.lineCap = 'round';
+  x.beginPath(); x.moveTo(104,146); x.quadraticCurveTo(128,172,152,146); x.stroke();
+  const t = new THREE.CanvasTexture(c); t.encoding = THREE.sRGBEncoding; return t;
+}
+const FACE_TEX = faceTex();
+
+// 超椭球：沿单位方向 u 解 (|x/a|^n + |y/b|^n + |z/c|^n = 1) 的交点，n 越大越方。
+// 棉花糖要的是圆角方块，直接把球压扁只会变成蛋。
+function blobGeom(a, b, c, n, ws, hs){
+  const g = new THREE.SphereGeometry(1, ws||36, hs||26), p = g.attributes.position, v = new THREE.Vector3();
+  for(let i = 0; i < p.count; i++){
+    v.fromBufferAttribute(p, i);
+    const s = Math.pow(Math.pow(Math.abs(v.x)/a, n) + Math.pow(Math.abs(v.y)/b, n) +
+                       Math.pow(Math.abs(v.z)/c, n), 1/n);
+    p.setXYZ(i, v.x/s, v.y/s, v.z/s);
+  }
+  g.computeVertexNormals(); return g;
+}
+const plushMat = (map, hex) => new THREE.MeshStandardMaterial({
+  map: map || null, color: map ? 0xffffff : hex, roughness: 0.92, metalness: 0,
+  // 车漆那套强光泽只给车身；毛绒要哑光，否则变成塑料摆件。emissive 只给一点点，
+  // 不然夜间模式整个车厢是黑的，乘客完全看不见。
+  envMapIntensity: 0.35, emissive: new THREE.Color(hex || 0xf6eef2), emissiveIntensity: 0.14 });
+const ell = (mat, a, b, c, n) => new THREE.Mesh(blobGeom(a, b, c, n || 2), mat);
+
+function makeBunny(){
+  const g = new THREE.Group();
+  const white = plushMat(plushTex('#ffffff', '#ffd2e4'), 0xf7e9ef);
+  const pink  = plushMat(null, 0xffb3cd);
+  const dark  = plushMat(null, 0x2a2226);
+  const body = ell(white, 0.085, 0.105, 0.075); body.position.y = 0.100; g.add(body);
+  const head = ell(white, 0.075, 0.068, 0.066); head.position.set(0, 0.238, 0.008); g.add(head);
+  const tail = ell(white, 0.022, 0.022, 0.018); tail.position.set(0, 0.085, -0.078); g.add(tail);
+  const nose = ell(pink,  0.010, 0.008, 0.008); nose.position.set(0, 0.226, 0.066); g.add(nose);
+  for(const sx of [-1, 1]){
+    // 耳朵连内耳一起进子组：内耳只是沿局部 +z 前移，跟着耳朵一起歪才不会飘到耳外
+    const ear = new THREE.Group();
+    ear.position.set(sx*0.033, 0.330, -0.004); ear.rotation.z = sx*0.20; ear.rotation.x = -0.10;
+    const out = ell(white, 0.021, 0.078, 0.014); out.position.y = 0.030; ear.add(out);
+    const inn = ell(pink,  0.011, 0.058, 0.006); inn.position.set(0, 0.030, 0.012); ear.add(inn);
+    g.add(ear);
+    const eye  = ell(dark, 0.011, 0.013, 0.010); eye.position.set(sx*0.030, 0.244, 0.058); g.add(eye);
+    const arm  = ell(white,0.026, 0.020, 0.030); arm.position.set(sx*0.072, 0.128, 0.026); arm.rotation.z = sx*0.5; g.add(arm);
+    const foot = ell(white,0.030, 0.017, 0.046); foot.position.set(sx*0.046, 0.016, 0.052); g.add(foot);
+    const blush= ell(pink, 0.017, 0.011, 0.008); blush.position.set(sx*0.047, 0.222, 0.048); g.add(blush);
+  }
+  return g;
+}
+function makeMallow(){
+  const g = new THREE.Group();
+  const body = new THREE.Mesh(blobGeom(0.098, 0.092, 0.086, 4.2), plushMat(plushTex('#ffffff', '#ffd9e8'), 0xf6eef2));
+  body.position.y = 0.093; g.add(body);
+  for(const sx of [-1, 1]){
+    const foot = ell(plushMat(null, 0xffc2d8), 0.030, 0.014, 0.036, 3);
+    foot.position.set(sx*0.046, 0.014, 0.030); g.add(foot);
+  }
+  // 脸是一张贴上去的贴纸：MeshBasic 不吃光照才像印刷品，depthWrite 关掉避免和团子面打架
+  const face = new THREE.Mesh(new THREE.PlaneGeometry(0.135, 0.135),
+    new THREE.MeshBasicMaterial({map: FACE_TEX, transparent:true, depthWrite:false}));
+  face.position.set(0, 0.104, 0.087); g.add(face);
+  return g;
+}
+function addRiders(car){
+  for(const r of RIDERS){
+    const fig = r.kind === 'bunny' ? makeBunny() : makeMallow();
+    fig.scale.setScalar(r.scale || RIDER_SCALE);
+    fig.position.set(r.x, r.y, r.z);
+    fig.rotation.y = r.yaw;
+    if(GHOST_RIDERS) fig.traverse(o => { if(o.isMesh){ o.material.depthTest = false; o.renderOrder = 8; } });
+    fig.traverse(o => { if(o.isMesh) o.userData.rider = r.kind; });
+    car.add(fig);
+    if(MARK_RIDERS){
+      const pad = new THREE.Mesh(new THREE.BoxGeometry(0.40, 0.010, 0.40),
+        new THREE.MeshBasicMaterial({color:0xff00ff, depthTest:false, transparent:true, opacity:.9}));
+      pad.position.set(r.x, r.y, r.z); pad.renderOrder = 9; car.add(pad);
+      const mid = new THREE.Mesh(new THREE.SphereGeometry(0.028, 12, 8),
+        new THREE.MeshBasicMaterial({color:0x00ff66, depthTest:false}));
+      mid.position.set(r.x, r.y + 0.24, r.z); mid.renderOrder = 9; car.add(mid);
+    }
+  }
+}
+
+// 把车漆/内饰壳在腰线以上切成一个半透明"玻璃罩"：下车身保持实心写深度，
+// 只有顶盖单独透明且不写深度，跟车相机才能看进车厢看到前排乘客。
+const CANOPY_Y = 0.90, CANOPY_ALPHA = 0.22;
+function canopySplit(mesh, yCut, alpha){
+  mesh.updateWorldMatrix(true, false);
+  const g = mesh.geometry.index ? mesh.geometry.toNonIndexed() : mesh.geometry;
+  const pos = g.attributes.position, nor = g.attributes.normal, uv = g.attributes.uv;
+  const lo = {p:[],n:[],u:[]}, hi = {p:[],n:[],u:[]};
+  const v = new THREE.Vector3();
+  for(let i = 0; i < pos.count; i += 3){
+    let cy = 0;
+    for(let k = 0; k < 3; k++){ v.fromBufferAttribute(pos, i+k); mesh.localToWorld(v); cy += v.y; }
+    const t = (cy/3) > yCut ? hi : lo;
+    for(let k = 0; k < 3; k++){
+      t.p.push(pos.getX(i+k), pos.getY(i+k), pos.getZ(i+k));
+      if(nor) t.n.push(nor.getX(i+k), nor.getY(i+k), nor.getZ(i+k));
+      if(uv)  t.u.push(uv.getX(i+k), uv.getY(i+k));
+    }
+  }
+  const mk = t => {
+    const ng = new THREE.BufferGeometry();
+    ng.setAttribute('position', new THREE.Float32BufferAttribute(t.p, 3));
+    if(t.n.length) ng.setAttribute('normal', new THREE.Float32BufferAttribute(t.n, 3));
+    if(t.u.length) ng.setAttribute('uv', new THREE.Float32BufferAttribute(t.u, 2));
+    return ng;
+  };
+  mesh.geometry = mk(lo);
+  const cm = [].concat(mesh.material)[0].clone();
+  cm.transparent = true; cm.opacity = alpha; cm.depthWrite = false; cm.side = THREE.DoubleSide;
+  const top = new THREE.Mesh(mk(hi), cm);
+  top.name = mesh.name + '_canopy';
+  top.position.copy(mesh.position); top.quaternion.copy(mesh.quaternion); top.scale.copy(mesh.scale);
+  top.renderOrder = 5;
+  mesh.parent.add(top);
+}
 // 车漆上的"太阳"是反射出来的，不是贴上去的高光：画一张天光渐变 + 一个亮圆，
 // 走 PMREM 生成环境贴图，MeshStandardMaterial 自己会把太阳反到车顶。
 function skyTexture(){
@@ -541,6 +690,9 @@ new THREE.GLTFLoader().load(modelURL(), g => {
       }
     }
   });
+  if(XRAY) for(const m of paintMats.concat(carMats)){
+    m.transparent = true; m.opacity = 0.14; m.depthWrite = false;
+  }
   obj.position.set(-ctr.x, -box.min.y, -ctr.z);           // 居中 + 落地
 
   const car = new THREE.Group(); car.add(obj);
@@ -575,9 +727,49 @@ new THREE.GLTFLoader().load(modelURL(), g => {
       car.add(sp); tailSprites.push(sp);
     }
   }
+  addRiders(car);
   car.rotation.y = CAR_YAW;
   car.position.set(0, 0, -(Z_EGO + size.z/2));            // 车尾对齐 Z_EGO
   scene.add(car);
+  car.updateMatrixWorld(true);
+  const shells = [];
+  obj.traverse(o => {
+    if(o.isMesh && !/_canopy$/.test(o.name) &&
+       (/M_Paint_Metal_High/.test(o.name) || /M_Internal_Interior_High/.test(o.name))) shells.push(o);
+  });
+  for(const o of shells) canopySplit(o, CANOPY_Y, CANOPY_ALPHA);
+  if(PROBE_RIDERS){
+    CAM.mode = 'drive'; CAM.k = 1; updateCamera(0);
+    car.updateMatrixWorld(true);
+    const ray = new THREE.Raycaster();
+    const L = ['drive cam (' + camera.position.x.toFixed(2) + ',' + camera.position.y.toFixed(2) + ',' + camera.position.z.toFixed(2) + ')'];
+    // 扫一张落座网格：每个 (y,z) 当作坐垫高度，头顶取 +0.30m，只看车身（不含乘客）挡不挡
+    const ys = [0.45, 0.55, 0.65, 0.75], zs = [0.60, 0.45, 0.30, 0.15, 0.00];
+    L.push('cell = z:VISIBLE | z:blocker@dist   (head = seat y + 0.30)');
+    for(const y of ys){
+      const row = [];
+      for(const z of zs){
+        const p = new THREE.Vector3(0.36, y + 0.30, z); car.localToWorld(p);
+        const dir = p.clone().sub(camera.position), dist = dir.length();
+        ray.set(camera.position, dir.normalize());
+        const hits = ray.intersectObject(obj, true);
+        let blocker = null, glass = null;
+        for(const h of hits){
+          const m = [].concat(h.object.material)[0];
+          if(m && m.transparent){ if(!glass) glass = h; continue; }
+          blocker = h; break;
+        }
+        const nm = blocker ? (blocker.object.name.split('M_')[1] || blocker.object.name).slice(0, 22) : '';
+        row.push(z.toFixed(2) + ':' + (!blocker || blocker.distance > dist ? 'VISIBLE' : nm + '@' + blocker.distance.toFixed(2)) + (glass ? '(glass)' : ''));
+      }
+      L.push('seat y=' + y.toFixed(2) + '  ' + row.join(' | '));
+    }
+    const pre = document.createElement('pre');
+    pre.id = 'probeout';
+    pre.style.cssText = 'position:fixed;left:0;top:0;z-index:99;margin:0;padding:4px;background:#fff;color:#000;font:11px monospace';
+    pre.textContent = L.join('\n');
+    document.body.appendChild(pre);
+  }
   // 倒影 = 把车组镜像到地面以下。clone() 默认共享材质，必须逐个 clone 材质，
   // 否则改倒影的透明度会把真车一起改透明。
   mirrorRoot = new THREE.Group();
@@ -703,7 +895,8 @@ function loop(ts){
   if(isDark !== wasDark){ wasDark = isDark; applyTheme(); }
   shown.speed += (D.speed - shown.speed) * 0.18;   // GPS 速度跳变大，这层平滑是必要的
   // 起步立刻转场到驾驶视角；停稳 6s 才回到环绕视角，避免每个红灯都切
-  if(shown.speed > 3){ CAM.mode = 'drive'; CAM.stopped = 0; }
+  if(FORCE_PARK){ CAM.mode = 'park'; CAM.stopped = 0; }
+  else if(shown.speed > 3){ CAM.mode = 'drive'; CAM.stopped = 0; }
   else if(shown.speed < 0.5){ if((CAM.stopped += dt) > 6){ CAM.mode='park'; } }
   else CAM.stopped = 0;
   if(CAM.mode !== lastMode){ lastMode = CAM.mode; updateHint(); }
@@ -715,7 +908,7 @@ function loop(ts){
     for(const m of dashes){ m.position.z += dz; if(m.position.z > 8) m.position.z -= 44*7.5; }
   }
   paint();
-  renderFrame();
+  if(!PROBE_RIDERS) renderFrame();   // 探针只要数学结果，不烘像素，快一个数量级
   requestAnimationFrame(loop);
 }
 
