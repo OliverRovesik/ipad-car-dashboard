@@ -80,10 +80,10 @@
     background:var(--card);backdrop-filter:blur(14px);border:1px solid var(--line);
     border-radius:16px;padding:clamp(5px,.9vh,8px) clamp(10px,1.4vw,18px);
     flex:0 0 auto}
-  #clkTime{font-size:clamp(18px,2.1vw,26px);font-weight:600;
+  #clkTime{font-size:clamp(24px,2.9vw,34px);font-weight:600;
     font-variant-numeric:tabular-nums}
-  #clkDate{font-size:clamp(10px,1.1vw,12.5px);color:var(--sub);font-weight:600}
-  #wx{font-size:clamp(11px,1.3vw,15px);font-weight:600;color:var(--sub);
+  #clkDate{font-size:clamp(14px,1.6vw,18px);color:var(--sub);font-weight:600}
+  #wx{font-size:clamp(16px,2.0vw,22px);font-weight:600;color:var(--sub);
     border-left:1px solid var(--line);padding-left:clamp(8px,1vw,14px)}
   #wx.bad{color:var(--amber)}
   #hint{left:50%;bottom:calc(clamp(12px,2.4vh,18px) + 46px);transform:translateX(-50%);transition:opacity .5s}
@@ -152,12 +152,6 @@
 <div class="ov chip" id="hint">← Drag to orbit the car →</div>
 
 <div class="ov" id="trip"><span>Trip</span><b id="vTrip">0.0</b><small>km · tap to reset</small></div>
-
-<div class="ov" id="note">
-  <div class="chip"><i class="dot off" id="dot"></i><span id="conn">Waiting for GPS</span></div>
-  <div class="chip sim hidden" id="wlwarn" style="color:#7a2a1a;background:rgba(255,170,140,.75);border-color:rgba(200,90,40,.4)"></div>
-  <div class="chip sim">Animated road · not a live view</div>
-</div>
 
 <div class="ov" id="load">Loading vehicle model…</div>
 
@@ -881,8 +875,6 @@ function paint(){
   document.querySelectorAll('#gearrow i').forEach(i=>i.classList.toggle('dim', i.dataset.g!==st));
   document.getElementById('ready').textContent = D.connected?'READY':'OFF';
   document.getElementById('ready').className   = D.connected?'':'off';
-  document.getElementById('dot').className     = 'dot '+(D.connected?'on':'off');
-  document.getElementById('conn').textContent  = D.connected?GPS_LABEL:'Waiting for GPS';
   document.getElementById('lampFix').className = 'lamp'+(D.connected?' on':' bad');
   document.getElementById('lampFix').lastChild.textContent = D.connected?'Position fixed':'No fix yet';
   document.getElementById('lampAcc').className = 'lamp'+(acc===null?'':acc>30?' bad':' on');
@@ -1026,6 +1018,11 @@ const WMO = { 0:'Clear', 1:'Mostly clear', 2:'Partly cloudy', 3:'Overcast', 45:'
   66:'Freezing rain', 67:'Heavy freezing rain', 71:'Light snow', 73:'Snow', 75:'Heavy snow',
   77:'Snow grains', 80:'Showers', 81:'Showers', 82:'Violent showers', 85:'Snow showers',
   86:'Snow showers', 95:'Thunderstorm', 96:'Thunderstorm + hail', 99:'Severe thunderstorm + hail' };
+const WXEMO = { 0:'☀️', 1:'🌤️', 2:'⛅', 3:'☁️', 45:'🌫️', 48:'🌫️',
+  51:'🌦️', 53:'🌦️', 55:'🌧️', 61:'🌧️', 63:'🌧️', 65:'🌧️',
+  66:'🌧️', 67:'🌧️', 71:'🌨️', 73:'❄️', 75:'❄️',
+  77:'🌨️', 80:'🌦️', 81:'🌧️', 82:'🌧️', 85:'🌨️',
+  86:'🌨️', 95:'⛈️', 96:'⛈️', 99:'⛈️' };
 // 定位失败/被拒时的兜底：用户在马尼拉
 const FALLBACK = { lat:14.5995, lon:120.9842 };
 const wxEl = document.getElementById('wx');
@@ -1036,7 +1033,8 @@ function loadWeather(lat, lon){
     .then(r => { if(!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
     .then(j => {
       const c = j.current || {};
-      wxEl.textContent = Math.round(c.temperature_2m) + '° ' + (WMO[c.weather_code] || '');
+      const emo = WXEMO[c.weather_code] ? WXEMO[c.weather_code] + ' ' : '';
+      wxEl.textContent = emo + Math.round(c.temperature_2m) + '° ' + (WMO[c.weather_code] || '');
       wxEl.className = '';
     })
     .catch(() => { wxEl.textContent = 'Weather n/a'; wxEl.className = 'bad'; });
@@ -1057,12 +1055,12 @@ async function keepAwake(){
   if(!navigator.wakeLock){ showWlWarn('Wake Lock not supported here'); return; }
   try{
     wl = await navigator.wakeLock.request('screen');
-    document.getElementById('wlwarn').classList.add('hidden');
     wl.addEventListener('release', () => { wl = null; });
   }catch(e){ wl = null; showWlWarn('Wake Lock denied:' + e.message); }
 }
 function showWlWarn(msg){
   const el = document.getElementById('wlwarn');
+  if(!el) return;
   el.textContent = msg; el.classList.remove('hidden');
 }
 document.addEventListener('visibilitychange', () => {
