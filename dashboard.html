@@ -95,6 +95,22 @@
     font-size:clamp(15px,1.6vw,20px);font-weight:700;color:var(--ink);text-decoration:none;
     display:flex;align-items:center;gap:9px;white-space:nowrap;transition:transform .12s}
   .fav:active{transform:scale(.94)}
+  /* 搜索交给谷歌地图自己搜。input 字号下限必须 >=16px，否则 iOS Safari 聚焦时会把整页放大 */
+  #search{display:flex;align-items:center;gap:8px;background:var(--card);
+    -webkit-backdrop-filter:blur(14px);backdrop-filter:blur(14px);
+    border:1px solid var(--line);border-radius:24px;padding:4px 4px 4px 16px}
+  #search input{-webkit-appearance:none;appearance:none;border:0;outline:0;background:transparent;
+    color:var(--ink);font-family:inherit;font-weight:600;font-size:clamp(16px,1.6vw,20px);
+    width:clamp(120px,16vw,220px);min-width:0;align-self:stretch}
+  #search input::placeholder{color:var(--sub);font-weight:600;opacity:1}
+  #search input::-webkit-search-decoration,
+  #search input::-webkit-search-cancel-button{-webkit-appearance:none;appearance:none}
+  #search button{-webkit-appearance:none;appearance:none;border:0;cursor:pointer;
+    background:rgba(120,132,148,.18);color:var(--ink);border-radius:19px;padding:9px 15px;
+    font-family:inherit;font-weight:700;font-size:clamp(16px,1.6vw,20px);transition:transform .12s}
+  #search button:active{transform:scale(.94)}
+  /* 窄到 1/3 分屏那一侧时收藏+搜索会换成两行，提示条要让出来 */
+  @media (max-width:520px){ #hint{bottom:calc(clamp(12px,2.4vh,18px) + 118px)} }
   .chip{background:var(--card);backdrop-filter:blur(14px);border:1px solid var(--line);
     border-radius:20px;padding:6px 13px;font-size:12.5px;font-weight:600;color:var(--sub);
     display:flex;align-items:center;gap:7px}
@@ -161,6 +177,15 @@
   <a class="fav" target="_blank" rel="noopener" href="https://www.google.com/maps/dir/?api=1&amp;travelmode=driving&amp;dir_action=navigate&amp;destination=14.6342128,121.0166671">🏠 Home</a>
   <a class="fav" target="_blank" rel="noopener" href="https://www.google.com/maps/dir/?api=1&amp;travelmode=driving&amp;dir_action=navigate&amp;destination=14.6685938,121.0116962">💼 Work</a>
   <a class="fav" target="_blank" rel="noopener" href="https://www.google.com/maps/dir/?api=1&amp;travelmode=driving&amp;dir_action=navigate&amp;destination=14.5564398,120.9956354">❤️</a>
+  <!-- GET 表单让浏览器自己拼 query=，零 JS、不受弹窗拦截，页面本身不被导航走。
+       api=1 必须是隐藏字段：规范里表单 GET 会用自己序列化出的 query 整体替换 action 上的 query。 -->
+  <form id="search" method="GET" target="_blank" rel="noopener"
+        action="https://www.google.com/maps/search/">
+    <input type="hidden" name="api" value="1">
+    <input name="query" type="search" required maxlength="120" autocomplete="off" spellcheck="false"
+           enterkeyhint="search" aria-label="Search Google Maps" placeholder="Search Google Maps">
+    <button type="submit" aria-label="Search in Google Maps">🔍</button>
+  </form>
 </div>
 
 <div class="ov" id="load">Loading vehicle model…</div>
