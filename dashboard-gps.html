@@ -215,7 +215,19 @@ function parkView(){
   _p.set(Math.sin(CAM.az)*r, carCenter.y + 0.55 + CAM.el*2.2, carCenter.z + Math.cos(CAM.az)*r);
   _l.copy(carCenter).add(_t.set(0, -0.05, 0));
 }
+// 惯性：松手后角速度指数衰减继续转。dt=0 的初始化调用必须先返回——那时 drag/FLICK 还没声明。
+function applyFlick(dt){
+  if(!dt || drag) return;
+  if(CAM.mode!=='park'){ FLICK.az = FLICK.el = 0; return; }
+  if(Math.abs(FLICK.az) < 0.02 && Math.abs(FLICK.el) < 0.02){ FLICK.az = FLICK.el = 0; return; }
+  CAM.az += FLICK.az * dt;
+  CAM.el  = Math.max(0.02, Math.min(0.55, CAM.el + FLICK.el * dt));
+  if(CAM.el <= 0.02 || CAM.el >= 0.55) FLICK.el = 0;   // 撞到俯仰限位就卸掉这份动量
+  const decay = Math.exp(-dt * 3.2);                   // 实测一次硬甩约 1.8s 收干、多转 110°
+  FLICK.az *= decay; FLICK.el *= decay;
+}
 function updateCamera(dt){
+  applyFlick(dt);
   CAM.k += ((CAM.mode==='drive'?1:0) - CAM.k) * Math.min(1, dt*3.2);   // 匀速逼近，约 1.2s
   const e = ease(Math.max(0, Math.min(1, CAM.k)));
   parkView();
@@ -225,22 +237,34 @@ function updateCamera(dt){
 }
 updateCamera(0);
 
-// 拖动：水平转方位、垂直转俯仰。只在停车模式生效。
+// 拖动：两个轴都取反向，做成"抓住车身转"的手感——手指往哪走，车就往哪转。
+// 只在停车模式生效；松手后把角速度交给 applyFlick 做惯性滑动。
 let drag = null;
+const FLICK = { az:0, el:0 };
+const DRAG_K = 0.008, TILT_K = 0.0022, FLICK_MAX = 6;
 const cvEl = renderer.domElement;
 cvEl.addEventListener('pointerdown', e=>{
   if(CAM.mode!=='park') return;
-  drag = { x:e.clientX, y:e.clientY, id:e.pointerId };
+  drag = { x:e.clientX, y:e.clientY, id:e.pointerId, t:performance.now() };
+  FLICK.az = FLICK.el = 0;                     // 抓住即止，不和上一次甩动叠加
   cvEl.setPointerCapture(e.pointerId);
   hintDone = true; updateHint();
 });
 cvEl.addEventListener('pointermove', e=>{
   if(!drag || e.pointerId!==drag.id) return;
-  CAM.az += (e.clientX - drag.x) * 0.008;
-  CAM.el  = Math.max(0.02, Math.min(0.55, CAM.el + (drag.y - e.clientY) * 0.0022));
-  drag.x = e.clientX; drag.y = e.clientY;
+  const dx = e.clientX - drag.x, dy = e.clientY - drag.y;
+  const now = performance.now();
+  const dt = Math.min(0.05, Math.max(0.008, (now - drag.t)/1000));   // 首帧/停顿都不给角速度尖峰
+  CAM.az -= dx * DRAG_K;
+  CAM.el  = Math.max(0.02, Math.min(0.55, CAM.el + dy * TILT_K));
+  FLICK.az = Math.max(-FLICK_MAX, Math.min(FLICK_MAX, FLICK.az + (-dx*DRAG_K/dt - FLICK.az) * 0.4));
+  FLICK.el = Math.max(-FLICK_MAX, Math.min(FLICK_MAX, FLICK.el + ( dy*TILT_K/dt - FLICK.el) * 0.4));
+  drag.x = e.clientX; drag.y = e.clientY; drag.t = now;
 });
-const endDrag = ()=>{ drag = null; };
+const endDrag = ()=>{
+  if(drag && performance.now() - drag.t > 90) FLICK.az = FLICK.el = 0;   // 抬指前已停手，就不甩
+  drag = null;
+};
 let hintDone = false;
 function updateHint(){
   document.getElementById('hint').classList.toggle('gone', hintDone || CAM.mode!=='park');
