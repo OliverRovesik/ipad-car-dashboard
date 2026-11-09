@@ -12,7 +12,7 @@ OUT=$SIM/$APP.app
 DEPLOY=${DEPLOY_TARGET:-15.0}
 UDID=""
 
-die() { echo "::error::$1"; xcrun simctl delete "$UDID" >/dev/null 2>&1 || true; exit 1; }
+die() { echo "::error::$1"; tmo 30 xcrun simctl delete "$UDID" >/dev/null 2>&1 || true; exit 1; }
 step() {
   NAME=$1; shift
   echo "[sim] $NAME"
@@ -22,17 +22,28 @@ step() {
   head -8 "$SIM/$NAME.err" | sed 's/^/::error::/' || true
   die "$NAME aborted"
 }
+# runner 上的 CoreSimulator 服务会楔死：单条 simctl 调用可能永远不返回，
+# 循环上限管不到它。看门狗到点 kill，把挂死变成一次普通的 step 失败。
+tmo() {
+  LIMIT=$1; shift
+  "$@" & CMD=$!
+  ( sleep "$LIMIT"; kill "$CMD" 2>/dev/null ) & WATCH=$!
+  wait "$CMD"; RC=$?
+  kill "$WATCH" 2>/dev/null
+  wait "$WATCH" 2>/dev/null
+  return $RC
+}
 
 mkdir -p "$SIM"
 echo "[sim] devicetypes"
-DT=$(xcrun simctl list devicetypes -j | python3 -c 'import json,sys
+DT=$(tmo 30 xcrun simctl list devicetypes -j | python3 -c 'import json,sys
 d=json.load(sys.stdin)["devicetypes"]
 ip=[x["identifier"] for x in d if x["name"].startswith("iPad ")]
-print(ip[0] if ip else "")')
-RT=$(xcrun simctl list runtimes -j | python3 -c 'import json,sys
+print(ip[0] if ip else "")' || true)
+RT=$(tmo 30 xcrun simctl list runtimes -j | python3 -c 'import json,sys
 rs=[r["identifier"] for r in json.load(sys.stdin)["runtimes"] if r.get("isAvailable")]
 ios=[r for r in rs if "SimRuntime.iOS" in r]
-print(sorted(ios)[-1] if ios else "")')
+print(sorted(ios)[-1] if ios else "")' || true)
 if [ -z "$DT" ] || [ -z "$RT" ]; then
   echo "::error::no iPad simulator runtime on this runner (devicetype=$DT runtime=$RT)"; exit 1
 fi
@@ -43,7 +54,7 @@ rm -rf "$SIM"; mkdir -p "$OUT"
 # clang 会拿 macOS 的 sysroot 去 target iPhone，产出的二进制平台不对（platform 应为 7）
 echo "[sim] compile for simulator"
 set +e
-xcrun --sdk iphonesimulator swiftc -O -target "arm64-apple-ios$DEPLOY-simulator" \
+tmo 300 xcrun --sdk iphonesimulator swiftc -O -target "arm64-apple-ios$DEPLOY-simulator" \
   -framework UIKit -framework WebKit -framework CoreLocation \
   -o "$OUT/$APP" "$ROOT"/app/Sources/*.swift 2>"$SIM/compile.err"
 CRC=$?
@@ -59,35 +70,36 @@ case "$BV" in *platform*7*) ;; *) echo "::error::simulator binary is not platfor
 
 cp "$ROOT/app/Info.plist" "$OUT/Info.plist"
 printf 'APPL' > "$OUT/PkgInfo"
-step "icon" sh "$ROOT/app/icon.sh" iphonesimulator "$OUT" "$SIM/icon-partial.plist"
+step "icon" tmo 180 sh "$ROOT/app/icon.sh" iphonesimulator "$OUT" "$SIM/icon-partial.plist"
 plutil -insert CFBundleSupportedPlatforms -json '["iPhoneSimulator"]' "$OUT/Info.plist"
 step "ad-hoc-sign" codesign --force --sign - "$OUT"
 
 echo "[sim] create device"
-UDID=$(xcrun simctl create cardash-smoke "$DT" "$RT")
+UDID=$(tmo 60 xcrun simctl create cardash-smoke "$DT" "$RT" || true)
+[ -n "$UDID" ] || die "simctl create returned no udid"
 echo "[sim] boot $UDID"
-xcrun simctl boot "$UDID"
+step "boot" tmo 90 xcrun simctl boot "$UDID"
 i=0; ST=""
 while [ "$i" -lt 30 ]; do
-  ST=$(xcrun simctl list devices -j | python3 -c "import json,sys
+  ST=$(tmo 25 xcrun simctl list devices -j | python3 -c "import json,sys
 d=json.load(sys.stdin)['devices']
 for rs in d.values():
     for x in rs:
-        if x['udid']=='$UDID': print(x['state'])")
+        if x['udid']=='$UDID': print(x['state'])" || true)
   if [ "$ST" = "Booted" ]; then break; fi
   sleep 4; i=$((i + 1))
 done
 echo "[sim] state=$ST after $((i * 4))s"
 [ "$ST" = "Booted" ] || die "simulator did not reach Booted (state=$ST)"
 
-step "install" xcrun simctl install "$UDID" "$OUT"
-BUNDLE=$(xcrun simctl get_app_container "$UDID" "$BID" app 2>/dev/null || true)
+step "install" tmo 120 xcrun simctl install "$UDID" "$OUT"
+BUNDLE=$(tmo 25 xcrun simctl get_app_container "$UDID" "$BID" app 2>/dev/null || true)
 if [ -n "$BUNDLE" ]; then
   CAR=no; if [ -s "$BUNDLE/Assets.car" ]; then CAR=yes; fi
   echo "::notice::installed bundle icon: Assets.car=$CAR CFBundleIconName=$(plutil -extract CFBundleIconName raw "$BUNDLE/Info.plist" 2>/dev/null || echo missing)"
 fi
 # 容器路径别猜：iOS app 沙盒在 Devices/<UDID>/data/Containers/Data/Application/<UUID>/ 下面
-CONT=$(xcrun simctl get_app_container "$UDID" "$BID" data 2>/dev/null || true)
+CONT=$(tmo 25 xcrun simctl get_app_container "$UDID" "$BID" data 2>/dev/null || true)
 echo "[sim] data container: ${CONT:-<none returned>}"
 TRACE=""
 if [ -n "$CONT" ]; then TRACE="$CONT/Library/Application Support/CarDash/ci-trace.log"; fi
@@ -96,7 +108,7 @@ if [ ! -s "$TRACE" ]; then
   [ -n "$ALT" ] && TRACE="$ALT"
 fi
 echo "[sim] launch (trace file: $TRACE)"
-step "launch" xcrun simctl launch "$UDID" "$BID"
+step "launch" tmo 60 xcrun simctl launch "$UDID" "$BID"
 
 # 模拟器里的 app 就是宿主机进程，pgrep 比任何日志管道都直接
 ALIVE=no; if pgrep -f "CarDash.app/CarDash" >/dev/null 2>&1; then ALIVE=yes; fi
@@ -119,8 +131,8 @@ if [ -f "$TRACE" ]; then cat "$TRACE"; else echo "[sim] trace file absent"; fi
 echo "::notice::trace after $((k * 5))s (result=$RES): $(tr '\n' '|' < "$TRACE" 2>/dev/null || echo '<no file>')"
 
 DETAIL=$(tail -1 "$TRACE" 2>/dev/null || echo "no trace file")
-xcrun simctl terminate "$UDID" "$BID" >/dev/null 2>&1 || true
-xcrun simctl delete "$UDID" >/dev/null 2>&1 || true
+tmo 30 xcrun simctl terminate "$UDID" "$BID" >/dev/null 2>&1 || true
+tmo 30 xcrun simctl delete "$UDID" >/dev/null 2>&1 || true
 
 echo "[sim] result=$RES ($DETAIL)"
 
