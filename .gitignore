@@ -2,3 +2,4 @@
 app/build/
 build.log
 app/build-sim/
+simtest.log

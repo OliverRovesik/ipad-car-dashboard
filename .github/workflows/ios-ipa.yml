@@ -44,9 +44,18 @@ jobs:
       - name: Simulator smoke test
         env:
           DEPLOY_TARGET: ${{ github.event.inputs.deploy_target || '15.0' }}
-        run: sh app/simtest.sh
+        run: |
+          set +e
+          sh app/simtest.sh 2>&1 | tee simtest.log
+          rc=${PIPESTATUS[0]}
+          if [ "$rc" -ne 0 ]; then
+            echo "::error::sim smoke test exited $rc"
+            tail -25 simtest.log | sed 's/^/::error::/'
+            exit "$rc"
+          fi
 
       - uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: CarDash-unsigned
           path: app/build/CarDash-unsigned.ipa
