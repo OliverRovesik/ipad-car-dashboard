@@ -80,53 +80,30 @@ echo "[sim] state=$ST after $((i * 4))s"
 [ "$ST" = "Booted" ] || die "simulator did not reach Booted (state=$ST)"
 
 step "install" xcrun simctl install "$UDID" "$OUT"
+TRACE="$HOME/Library/Developer/CoreSimulator/Devices/$UDID/data/Library/Application Support/CarDash/ci-trace.log"
+echo "[sim] launch (trace file: $TRACE)"
+step "launch" xcrun simctl launch "$UDID" "$BID"
 
-CAP=$SIM/app.log
-: > "$CAP"
-# 尝试 1：--console 让 simctl 把 app 的 stdout/stderr 打到它自己的 stdio，由 shell 重定向。
-# （simctl launch 并不认 --stdout/--stderr：会被当成 destination，报 "Invalid device: --stdout"）
-echo "[sim] launch attempt 1 (--console)"
-xcrun simctl launch --console "$UDID" "$BID" >"$CAP" 2>&1 &
-LP=$!
-sleep 40
-kill "$LP" >/dev/null 2>&1 || true
-wait "$LP" 2>/dev/null || true
-
-if ! grep -q CARDASH "$CAP"; then
-  echo "[sim] attempt1 captured: $(head -3 "$CAP" | tr '\n' ' ')"
-  echo "[sim] launch attempt 2 (plain launch + log stream)"
-  xcrun simctl spawn "$UDID" log stream --style compact --level debug \
-      --predicate 'eventMessage CONTAINS "CARDASH"' >"$SIM/stream.log" 2>&1 &
-  SP=$!
-  sleep 8
-  set +e; xcrun simctl launch "$UDID" "$BID" 2>"$SIM/launch2.err"; L2=$?; set -e
-  if [ "$L2" -ne 0 ]; then
-    echo "::error::plain launch rc=$L2"
-    head -5 "$SIM/launch2.err" | sed 's/^/::error::/' || true
+# 轮询 app 自己写的容器文件，不再碰 simctl 的日志管道
+k=0; RES=quiet
+while [ "$k" -lt 20 ]; do
+  if [ -f "$TRACE" ]; then
+    if grep -q "load finished" "$TRACE"; then RES=ok; break; fi
+    if grep -q "load failed" "$TRACE"; then RES=fail; break; fi
+    if grep -q "launched" "$TRACE"; then RES=started; fi
   fi
-  sleep 35
-  kill "$SP" >/dev/null 2>&1 || true
-  wait "$SP" 2>/dev/null || true
-  cat "$SIM/stream.log" >> "$CAP"
-fi
+  sleep 5; k=$((k + 1))
+done
 
-echo "[sim] --- captured app output (tail) ---"
-tail -20 "$CAP" 2>/dev/null || echo "[sim] nothing captured"
+echo "[sim] --- ci-trace.log ---"
+if [ -f "$TRACE" ]; then cat "$TRACE"; else echo "[sim] trace file absent"; fi
+echo "::notice::trace after $((k * 5))s (result=$RES): $(tr '\n' '|' < "$TRACE" 2>/dev/null || echo '<no file>')"
 
-RES=""; DETAIL=""
-if grep -q "CARDASH: load finished" "$CAP" 2>/dev/null; then
-  RES=ok; DETAIL=$(grep "CARDASH: load finished" "$CAP" | tail -1)
-elif grep -q "CARDASH: load failed" "$CAP" 2>/dev/null; then
-  RES=fail; DETAIL=$(grep "CARDASH: load failed" "$CAP" | tail -1)
-elif grep -q "CARDASH: launched" "$CAP" 2>/dev/null; then
-  RES=started; DETAIL="app launched but no navigation callback within the wait"
-else
-  RES=quiet; DETAIL="no CARDASH line captured by either launch path"
-fi
-echo "[sim] result=$RES ($DETAIL)"
-
+DETAIL=$(tail -1 "$TRACE" 2>/dev/null || echo "no trace file")
 xcrun simctl terminate "$UDID" "$BID" >/dev/null 2>&1 || true
 xcrun simctl delete "$UDID" >/dev/null 2>&1 || true
+
+echo "[sim] result=$RES ($DETAIL)"
 
 case "$RES" in
   ok)   echo "::notice::sim smoke PASSED: $DETAIL" ;;
