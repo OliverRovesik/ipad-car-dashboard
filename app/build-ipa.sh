@@ -24,6 +24,7 @@ xcrun --sdk iphoneos swiftc -O -target "arm64-apple-ios$DEPLOY" \
 cp "$ROOT/app/Info.plist" "$APP/Info.plist"
 printf 'APPL' > "$APP/PkgInfo"
 sh "$ROOT/app/icon.sh" iphoneos "$APP" "$OUT/icon-partial.plist"
+sh "$ROOT/app/embed-web.sh" "$APP"
 plutil -insert CFBundleSupportedPlatforms -json '["iPhoneOS"]' "$APP/Info.plist"
 plutil -lint "$APP/Info.plist"
 printf 'LC_BUILD_VERSION: '; otool -l "$APP/$APP_NAME" | grep -A4 LC_BUILD_VERSION | grep -E 'platform|minos' | tr -s ' '

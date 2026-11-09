@@ -71,6 +71,7 @@ case "$BV" in *platform*7*) ;; *) echo "::error::simulator binary is not platfor
 cp "$ROOT/app/Info.plist" "$OUT/Info.plist"
 printf 'APPL' > "$OUT/PkgInfo"
 step "icon" tmo 180 sh "$ROOT/app/icon.sh" iphonesimulator "$OUT" "$SIM/icon-partial.plist"
+step "embed-web" tmo 60 sh "$ROOT/app/embed-web.sh" "$OUT"
 plutil -insert CFBundleSupportedPlatforms -json '["iPhoneSimulator"]' "$OUT/Info.plist"
 step "ad-hoc-sign" codesign --force --sign - "$OUT"
 
@@ -139,7 +140,52 @@ tmo 30 xcrun simctl delete "$UDID" >/dev/null 2>&1 || true
 echo "[sim] result=$RES ($DETAIL)"
 
 case "$RES" in
-  ok)   echo "::notice::sim smoke PASSED: $DETAIL" ;;
+  ok)
+    # 硬性断言：trace 必须包含这些，否则说明 bundle 加载路径没走通
+    HARD_FAIL=no
+    if ! grep -q "compose ok source=bundle" "$TRACE"; then
+      echo "::error::trace lacks 'compose ok source=bundle'"; HARD_FAIL=yes
+    fi
+    if ! grep -q "inlined=3/3" "$TRACE"; then
+      echo "::error::trace lacks 'inlined=3/3'"; HARD_FAIL=yes
+    fi
+    if ! grep -q "rootvc layout" "$TRACE"; then
+      echo "::error::trace lacks 'rootvc layout'"; HARD_FAIL=yes
+    fi
+    if ! grep -q "overlay hidden" "$TRACE"; then
+      echo "::error::trace lacks 'overlay hidden'"; HARD_FAIL=yes
+    fi
+    # 探针：secure context + geolocation + three.js + renderer 必须存在
+    if ! grep -q "probe.*secure:true" "$TRACE"; then
+      echo "::error::probe did not report secure:true"; HARD_FAIL=yes
+    fi
+    if ! grep -q 'probe.*geo:"object"' "$TRACE"; then
+      echo "::error::probe did not report geo:object"; HARD_FAIL=yes
+    fi
+    if ! grep -q 'probe.*three:"object"' "$TRACE"; then
+      echo "::error::probe did not report three:object"; HARD_FAIL=yes
+    fi
+    if ! grep -q 'probe.*renderer:"object"' "$TRACE"; then
+      echo "::error::probe did not report renderer:object"; HARD_FAIL=yes
+    fi
+    # glb 长度 > 1000000（fiesta.data.js 是 3.96 MB）
+    if ! grep -qE 'probe.*glb:[0-9]{7,}' "$TRACE"; then
+      echo "::error::probe glb length < 1000000"; HARD_FAIL=yes
+    fi
+    if [ "$HARD_FAIL" = "yes" ]; then
+      echo "::error::hard assertions failed, trace:"
+      sed 's/^/::error::/' "$TRACE"
+      exit 1
+    fi
+    # 软性断言：只发 notice
+    if grep -q "probe ok" "$TRACE"; then
+      echo "::notice::probe ok (car model rendered)"
+    else
+      echo "::notice::probe did not reach 'ok' (car may not have rendered in sim)"
+    fi
+    grep -qE 'probe.*car:\{' "$TRACE" && echo "::notice::probe car non-null" || true
+    grep -qE 'probe.*canvas:true' "$TRACE" && echo "::notice::probe canvas true" || true
+    echo "::notice::sim smoke PASSED: $DETAIL" ;;
   *)
     echo "::error::sim smoke FAILED ($RES): $DETAIL"
     sleep 10   # .ips 是异步落盘的，立刻找会扑空
