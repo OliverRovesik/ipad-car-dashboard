@@ -85,7 +85,7 @@ while [ "$i" -lt 30 ]; do
 d=json.load(sys.stdin)['devices']
 for rs in d.values():
     for x in rs:
-        if x['udid']=='$UDID': print(x['state'])" || true)
+        if x['udid']=='$UDID': print(x['state'])" 2>/dev/null || true)
   if [ "$ST" = "Booted" ]; then break; fi
   sleep 4; i=$((i + 1))
 done
@@ -104,7 +104,7 @@ echo "[sim] data container: ${CONT:-<none returned>}"
 TRACE=""
 if [ -n "$CONT" ]; then TRACE="$CONT/Library/Application Support/CarDash/ci-trace.log"; fi
 if [ ! -s "$TRACE" ]; then
-  ALT=$(find "$HOME/Library/Developer/CoreSimulator/Devices/$UDID/data" -name ci-trace.log 2>/dev/null | head -1 || true)
+  ALT=$(find "$HOME/Library/Developer/CoreSimulator/Devices" -name ci-trace.log 2>/dev/null | head -1 || true)
   [ -n "$ALT" ] && TRACE="$ALT"
 fi
 echo "[sim] launch (trace file: $TRACE)"

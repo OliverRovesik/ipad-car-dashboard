@@ -23,4 +23,8 @@ PY
 if [ ! -s "$APPDIR/Assets.car" ]; then
   echo "::error::Assets.car missing after actool"; exit 1
 fi
-echo "::notice::icon compiled: Assets.car $(wc -c < "$APPDIR/Assets.car" | tr -d ' ') bytes, CFBundleIconName=$(plutil -extract CFBundleIconName raw "$APPDIR/Info.plist")"
+ICON_NAME=$(plutil -extract CFBundleIconName raw "$APPDIR/Info.plist" 2>/dev/null || true)
+if [ -z "$ICON_NAME" ]; then
+  echo "::error::CFBundleIconName missing after merge; home screen would show no icon"; exit 1
+fi
+echo "::notice::icon compiled: Assets.car $(wc -c < "$APPDIR/Assets.car" | tr -d ' ') bytes, CFBundleIconName=$ICON_NAME"
