@@ -159,20 +159,21 @@ case "$RES" in
       echo "::error::trace lacks 'overlay hidden'"; HARD_FAIL=yes
     fi
     # 探针：secure context + geolocation + three.js + renderer 必须存在
-    if ! grep -q "probe.*secure:true" "$TRACE"; then
+    # 输出是 JSON，键值都带双引号；这里必须按 '"secure":true' 这种形态匹配
+    if ! grep -q '"secure":true' "$TRACE"; then
       echo "::error::probe did not report secure:true"; HARD_FAIL=yes
     fi
-    if ! grep -q 'probe.*geo:"object"' "$TRACE"; then
+    if ! grep -q '"geo":"object"' "$TRACE"; then
       echo "::error::probe did not report geo:object"; HARD_FAIL=yes
     fi
-    if ! grep -q 'probe.*three:"object"' "$TRACE"; then
+    if ! grep -q '"three":"object"' "$TRACE"; then
       echo "::error::probe did not report three:object"; HARD_FAIL=yes
     fi
-    if ! grep -q 'probe.*renderer:"object"' "$TRACE"; then
+    if ! grep -q '"renderer":"object"' "$TRACE"; then
       echo "::error::probe did not report renderer:object"; HARD_FAIL=yes
     fi
     # glb 长度 > 1000000（fiesta.data.js 是 3.96 MB）
-    if ! grep -qE 'probe.*glb:[0-9]{7,}' "$TRACE"; then
+    if ! grep -qE '"glb":[0-9]{7,}' "$TRACE"; then
       echo "::error::probe glb length < 1000000"; HARD_FAIL=yes
     fi
     if [ "$HARD_FAIL" = "yes" ]; then
@@ -186,8 +187,8 @@ case "$RES" in
     else
       echo "::notice::probe did not reach 'ok' (car may not have rendered in sim)"
     fi
-    grep -qE 'probe.*car:\{' "$TRACE" && echo "::notice::probe car non-null" || true
-    grep -qE 'probe.*canvas:true' "$TRACE" && echo "::notice::probe canvas true" || true
+    grep -qE '"car":\{' "$TRACE" && echo "::notice::probe car non-null" || true
+    grep -qE '"canvas":true' "$TRACE" && echo "::notice::probe canvas true" || true
     echo "::notice::sim smoke PASSED: $DETAIL" ;;
   *)
     echo "::error::sim smoke FAILED ($RES): $DETAIL"
