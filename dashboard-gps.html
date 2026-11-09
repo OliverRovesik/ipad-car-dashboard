@@ -130,6 +130,53 @@
   #load.bad{color:var(--red)}
   #load.hidden{display:none}
 
+  /* 滚动歌词：右侧一张半透明卡，5 行窗口，当前行高亮并停在中间。
+     数据来自原生壳（Apple Music 的 now-playing 状态），网页只负责按时间轴滚动。 */
+  #lyrics{right:clamp(14px,2vw,24px);top:50%;transform:translateY(-50%);
+    width:min(clamp(260px,30vw,400px),calc(100vw - 28px));
+    background:var(--card);-webkit-backdrop-filter:blur(16px);backdrop-filter:blur(16px);
+    border:1px solid var(--line);border-radius:20px;
+    padding:clamp(10px,1.4vh,16px) clamp(12px,1.4vw,18px);
+    display:flex;flex-direction:column;gap:8px;
+    box-shadow:0 18px 46px rgba(8,14,22,.18);
+    transition:opacity .35s ease,transform .35s ease}
+  #lyrics.hidden{opacity:0;pointer-events:none;transform:translateY(-50%) translateX(16px)}
+  #lyrHead{display:flex;align-items:flex-start;gap:10px}
+  #lyrMeta{min-width:0;flex:1 1 auto}
+  #lyrTitle{font-size:clamp(15px,1.7vw,19px);font-weight:700;white-space:nowrap;
+    overflow:hidden;text-overflow:ellipsis}
+  #lyrArtist{font-size:clamp(12px,1.25vw,14px);color:var(--sub);font-weight:600;
+    white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  #lyrView{position:relative;--lh:clamp(24px,3.4vh,34px);height:calc(var(--lh) * 5);
+    overflow:hidden;
+    -webkit-mask-image:linear-gradient(transparent,#000 18%,#000 82%,transparent);
+    mask-image:linear-gradient(transparent,#000 18%,#000 82%,transparent)}
+  #lyrList{list-style:none;transition:transform .5s cubic-bezier(.22,.61,.36,1);will-change:transform}
+  #lyrList li{height:var(--lh);line-height:var(--lh);font-size:clamp(14px,1.55vw,17px);
+    color:var(--sub);font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+    opacity:.5;transition:opacity .3s,color .3s}
+  #lyrList li.on{color:var(--ink);opacity:1;font-weight:700}
+  #lyrMsg{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+    text-align:center;font-size:13.5px;line-height:1.3;color:var(--sub);font-weight:600;padding:0 8px}
+  #lyrMsg.hidden{display:none}
+  #lyrFoot{display:flex;align-items:center;justify-content:flex-end;gap:8px}
+  .lyrBtn{-webkit-appearance:none;appearance:none;border:1px solid var(--line);
+    background:rgba(120,132,148,.14);color:var(--ink);border-radius:11px;
+    min-width:34px;min-height:30px;padding:0 9px;cursor:pointer;
+    font-family:inherit;font-size:14px;font-weight:700;transition:transform .12s}
+  .lyrBtn:active{transform:scale(.93)}
+  #lyrOff{font-size:12px;color:var(--sub);font-weight:700;
+    font-variant-numeric:tabular-nums;min-width:56px;text-align:center}
+  #lyrOpen{right:clamp(14px,2vw,24px);top:50%;transform:translateY(-50%);z-index:4;
+    cursor:pointer;border:1px solid var(--line);background:var(--card);
+    -webkit-backdrop-filter:blur(14px);backdrop-filter:blur(14px);
+    border-radius:16px;color:var(--sub);padding:12px 10px;font-size:18px;font-weight:700}
+  #lyrOpen.hidden{display:none}
+  /* 窗口被压得太小时右侧没有一条完整的空带：窄窗顶栏会把 OBD 卡片折到第二行，
+     矮窗则会撞上右下角的 Trip。宁可整张卡不显示，也不让它盖住读数。 */
+  @media (max-width:620px) and (max-height:720px){ #lyrics,#lyrOpen{display:none} }
+  @media (max-height:560px){ #lyrics,#lyrOpen{display:none} }
+
   /* iPad 开夜间模式时整屏跟着变暗 */
   @media (prefers-color-scheme: dark){
     :root{
@@ -191,6 +238,28 @@
     <button type="submit" aria-label="Search in Google Maps">🔍</button>
   </form>
 </div>
+
+<!-- 滚动歌词：原生壳用 window.CarDashLyrics.setTrack/sync 推当前曲目和播放进度，
+     网页自己按单调时钟外推位置，0.5s 一次的进度更新不会让歌词一跳一跳 -->
+<div class="ov hidden" id="lyrics" aria-live="polite">
+  <div id="lyrHead">
+    <div id="lyrMeta">
+      <div id="lyrTitle">—</div>
+      <div id="lyrArtist"></div>
+    </div>
+    <button class="lyrBtn" id="lyrClose" aria-label="Hide lyrics">✕</button>
+  </div>
+  <div id="lyrView">
+    <ul id="lyrList"></ul>
+    <div id="lyrMsg">Play something in Apple Music</div>
+  </div>
+  <div id="lyrFoot">
+    <button class="lyrBtn" id="lyrMinus" aria-label="Lyrics earlier">−0.5s</button>
+    <span id="lyrOff">0.0s</span>
+    <button class="lyrBtn" id="lyrPlus" aria-label="Lyrics later">+0.5s</button>
+  </div>
+</div>
+<div class="ov hidden" id="lyrOpen" role="button" aria-label="Show lyrics">♪</div>
 
 <div class="ov" id="load">Loading vehicle model…</div>
 
@@ -1141,6 +1210,157 @@ document.getElementById('search').addEventListener('submit', () => {
   const el = document.activeElement;
   if(el && el.blur) el.blur();
 });
+
+/* ---------- 滚动歌词 ---------- */
+// 原生壳（app/Sources/Lyrics.swift）每 0.5s 推一次播放进度，页面按单调时钟外推位置，
+// 这样滚动是连续的；只有漂移 >0.35s 或播放/暂停切换才重新对齐。
+// WKWebView 的 loadHTMLString 页面在某些配置下访问 localStorage 会抛 SecurityError，
+// 这里全部走 try/catch：读写失败只丢设置，绝不能让整段脚本（连同 keepAwake）停掉。
+function lyrStore(k, v){
+  try{
+    if(v === undefined) return localStorage.getItem(k);
+    localStorage.setItem(k, v);
+  }catch(e){ return null; }
+}
+const LYR = {
+  on: lyrStore('lyrics.open') !== '0',
+  key: '', status: 'idle', title: '', artist: '',
+  lines: [], sig: '',
+  base: 0, baseAt: 0, playing: false, rate: 1,
+  idx: -2,
+  off: Number(lyrStore('lyrics.offset')) || 0
+};
+const lyrEl = document.getElementById('lyrics');
+const lyrList = document.getElementById('lyrList');
+const lyrView = document.getElementById('lyrView');
+const lyrMsg = document.getElementById('lyrMsg');
+const lyrOpen = document.getElementById('lyrOpen');
+const lyrOffEl = document.getElementById('lyrOff');
+const lyrTitleEl = document.getElementById('lyrTitle');
+const lyrArtistEl = document.getElementById('lyrArtist');
+
+function lyrPos(){
+  return LYR.base + (LYR.playing ? (performance.now() - LYR.baseAt) / 1000 * (LYR.rate || 1) : 0);
+}
+function lyrResync(pos, playing, rate){
+  LYR.base = Math.max(0, +pos || 0);
+  LYR.baseAt = performance.now();
+  LYR.playing = !!playing;
+  LYR.rate = (+rate > 0) ? +rate : 1;
+  LYR.idx = -2;                       // 重新定位后强制重绘一次
+}
+function lyrBuild(){
+  lyrList.textContent = '';
+  const frag = document.createDocumentFragment();
+  LYR.lines.forEach(l => {
+    const li = document.createElement('li');
+    const sp = document.createElement('span');
+    sp.textContent = l.text;
+    li.appendChild(sp);
+    frag.appendChild(li);
+  });
+  lyrList.appendChild(frag);
+  lyrList.style.transform = 'translateY(0)';
+  LYR.idx = -2;
+}
+function lyrChrome(){
+  lyrTitleEl.textContent = LYR.title || '—';
+  lyrArtistEl.textContent = LYR.artist || '';
+  let msg = '';
+  if(LYR.status === 'loading') msg = 'Searching lyrics…';
+  else if(LYR.status === 'none') msg = 'No synced lyrics for this track';
+  else if(LYR.status === 'error') msg = 'Lyrics lookup failed';
+  else if(LYR.status === 'denied') msg = 'Allow Media & Apple Music access in Settings';
+  else if(!LYR.title) msg = 'Play something in Apple Music';
+  else if(!LYR.lines.length && LYR.status === 'ok') msg = 'No synced lyrics for this track';
+  lyrMsg.textContent = msg;
+  lyrMsg.classList.toggle('hidden', !msg);
+  const show = LYR.on && (!!LYR.title || LYR.status === 'denied');
+  lyrEl.classList.toggle('hidden', !show);
+  lyrOpen.classList.toggle('hidden', !(LYR.title && !LYR.on));
+  lyrOffEl.textContent = (LYR.off > 0 ? '+' : '') + LYR.off.toFixed(1) + 's';
+}
+function lyrSetTrack(j){
+  if(!j || typeof j !== 'object') return;
+  LYR.key = String(j.key || '');
+  LYR.title = j.title || '';
+  LYR.artist = j.artist || '';
+  LYR.status = j.status || 'ok';
+  const raw = Array.isArray(j.lines) ? j.lines : [];
+  const first = raw[0], last = raw[raw.length - 1];
+  const sig = LYR.key + '|' + raw.length + '|' + (Array.isArray(first) ? first[0] : '') + '|' +
+              (Array.isArray(last) ? last[0] : '');
+  if(sig !== LYR.sig){
+    LYR.sig = sig;
+    LYR.lines = raw.map(l => Array.isArray(l)
+      ? { t: +l[0], text: String(l[1]) }
+      : { t: +(l || {}).t, text: String((l || {}).text || '') }
+    ).filter(l => isFinite(l.t) && l.text);
+    lyrBuild();
+  }
+  lyrResync(j.position, j.playing, j.rate);
+  lyrChrome();
+  lyrTick();
+}
+function lyrSync(j){
+  if(!j || typeof j !== 'object') return;
+  const pos = +j.position || 0;
+  const playing = !!j.playing;
+  const est = lyrPos();
+  if(playing !== LYR.playing || !playing || Math.abs(est - pos) > 0.35){
+    lyrResync(pos, playing, j.rate);
+  }else if(+j.rate > 0){
+    LYR.rate = +j.rate;
+  }
+}
+function lyrTick(){
+  if(!LYR.lines.length) return;
+  const now = lyrPos() - LYR.off;     // off 为正 = 歌词推后
+  let lo = 0, hi = LYR.lines.length - 1, idx = -1;
+  while(lo <= hi){
+    const mid = (lo + hi) >> 1;
+    if(LYR.lines[mid].t <= now){ idx = mid; lo = mid + 1; }
+    else hi = mid - 1;
+  }
+  if(idx === LYR.idx) return;
+  LYR.idx = idx;
+  const items = lyrList.children;
+  for(let i = 0; i < items.length; i++) items[i].classList.toggle('on', i === idx);
+  const lh = lyrView.clientHeight / 5;
+  const slot = Math.max(0, idx);      // 还没开唱时让第一行先停在中间
+  lyrList.style.transform = 'translateY(' + ((2 - slot) * lh).toFixed(1) + 'px)';
+}
+setInterval(lyrTick, 250);
+
+function lyrOffset(d){
+  LYR.off = Math.max(-10, Math.min(10, Math.round((LYR.off + d) * 10) / 10));
+  lyrStore('lyrics.offset', String(LYR.off));
+  LYR.idx = -2;
+  lyrChrome();
+  lyrTick();
+}
+document.getElementById('lyrMinus').addEventListener('click', () => lyrOffset(-0.5));
+document.getElementById('lyrPlus').addEventListener('click', () => lyrOffset(0.5));
+document.getElementById('lyrClose').addEventListener('click', () => {
+  LYR.on = false;
+  lyrStore('lyrics.open', '0');
+  lyrChrome();
+});
+lyrOpen.addEventListener('click', () => {
+  LYR.on = true;
+  lyrStore('lyrics.open', '1');
+  lyrChrome();
+});
+
+// 浏览器里没有原生壳：?lyricsdemo / #lyricsdemo 塞一份假时间轴，用来验证滚动和布局
+window.CarDashLyrics = { setTrack: lyrSetTrack, sync: lyrSync };
+if(location.hash.indexOf('lyricsdemo') >= 0 || location.search.indexOf('lyricsdemo') >= 0){
+  window.CarDashLyrics.setTrack({
+    key: 'demo', status: 'ok', title: 'Demo Track', artist: 'CarDash', album: '',
+    duration: 120, playing: true, position: 0, rate: 1,
+    lines: Array.from({ length: 30 }, (_, i) => [i * 2.5 + 1, 'Demo lyric line ' + (i + 1)])
+  });
+}
 
 keepAwake();
 

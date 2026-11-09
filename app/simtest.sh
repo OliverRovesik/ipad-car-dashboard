@@ -130,6 +130,10 @@ done
 ALIVE2=no; if pgrep -f "CarDash.app/CarDash" >/dev/null 2>&1; then ALIVE2=yes; fi
 echo "::notice::alive after launch=$ALIVE, after $((k * 5))s=$ALIVE2, container=${CONT:-<none>}"
 
+# 探针行一出现就 break，而模拟器的歌词演示在 didFinish 后 0.3s 才注入、还要回读 DOM；
+# 稍等再 dump，否则会稳定误判成"歌词没渲染"
+if [ "$RES" = "ok" ]; then sleep 2; fi
+
 echo "[sim] --- ci-trace.log ---"
 if [ -f "$TRACE" ]; then cat "$TRACE"; else echo "[sim] trace file absent"; fi
 echo "::notice::trace after $((k * 5))s (result=$RES): $(tr '\n' '|' < "$TRACE" 2>/dev/null || echo '<no file>')"
@@ -157,6 +161,10 @@ case "$RES" in
     fi
     if ! grep -q "overlay hidden" "$TRACE"; then
       echo "::error::trace lacks 'overlay hidden'"; HARD_FAIL=yes
+    fi
+    # 歌词桥：模拟器推 30 行假数据后回读页面 DOM，证明 SceneDelegate→LyricsBridge→页面这条链是通的
+    if ! grep -q 'lyrics demo push result=.*"rows":30' "$TRACE"; then
+      echo "::error::lyrics bridge did not render 30 demo rows"; HARD_FAIL=yes
     fi
     # 探针：secure context + geolocation + three.js + renderer 必须存在
     # 输出是 JSON，键值都带双引号；这里必须按 '"secure":true' 这种形态匹配

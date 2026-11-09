@@ -148,6 +148,7 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate, WKNavigationDeleg
     cardashTrace("overlay hidden")
     if !probed { probed = true; probe(0) }
     if !syncStarted { syncStarted = true; WebSync.run() }
+    if let v = web { LyricsBridge.shared.start(v) }
   }
 
   // 内置页面是否真的在 WebKit 里跑起来了，只有问页面自己才知道：
