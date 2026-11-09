@@ -26,7 +26,12 @@ printf 'APPL' > "$APP/PkgInfo"
 plutil -insert CFBundleSupportedPlatforms -json '["iPhoneOS"]' "$APP/Info.plist"
 plutil -lint "$APP/Info.plist"
 printf 'LC_BUILD_VERSION: '; otool -l "$APP/$APP_NAME" | grep -A4 LC_BUILD_VERSION | grep -E 'platform|minos' | tr -s ' '
-echo "::notice::device binary build version: $(otool -l "$APP/$APP_NAME" | grep -A4 LC_BUILD_VERSION | grep -E 'platform|minos' | tr -s ' \n' ' ')"
+BV=$(otool -l "$APP/$APP_NAME" | grep -A4 LC_BUILD_VERSION | grep -E 'platform|minos' | tr -s ' \n' ' ')
+echo "::notice::device binary build version:$BV"
+case "$BV" in
+  *platform*2*minos*) ;;
+  *) echo "::error::binary is not iOS platform 2:$BV"; exit 1 ;;
+esac
 printf 'arch: '; lipo -archs "$APP/$APP_NAME" 2>/dev/null || file "$APP/$APP_NAME"
 
 (cd "$OUT" && rm -f "$APP_NAME-unsigned.ipa" && zip -qry "$APP_NAME-unsigned.ipa" Payload)
