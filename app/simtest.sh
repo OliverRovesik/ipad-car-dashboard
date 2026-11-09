@@ -109,11 +109,29 @@ case "$RES" in
   ok)   echo "::notice::sim smoke PASSED: $DETAIL" ;;
   *)
     echo "::error::sim smoke FAILED ($RES): $DETAIL"
-    CR=$(ls -t ~/Library/Logs/DiagnosticReports/ 2>/dev/null | grep -i cardash | head -1 || true)
+    CR=$(ls -t ~/Library/Logs/DiagnosticReports/ 2>/dev/null | grep -i '^CarDash' | head -1 || true)
     if [ -n "$CR" ]; then
       echo "::error::crash report: $CR"
-      grep -m5 -E "Exception Type|Termination Reason|Triggered by Thread" \
-        ~/Library/Logs/DiagnosticReports/"$CR" 2>/dev/null | sed 's/^/::error::/' || true
+      python3 - "$HOME/Library/Logs/DiagnosticReports/$CR" <<'PY' 2>&1 | sed 's/^/::error::/' | head -14
+import json, sys
+raw = open(sys.argv[1]).read().split('\n', 1)
+if len(raw) < 2:
+    print('unexpected .ips layout:', raw[0][:300]); raise SystemExit
+try:
+    d = json.loads(raw[1])
+except Exception as e:
+    print('cannot parse .ips json:', e); print(raw[1][:500]); raise SystemExit
+print('exception   :', d.get('exception'))
+print('termination :', d.get('termination'))
+print('asiBacktrace:', d.get('asiBacktrace'))
+print('codesigning :', d.get('codesigning'))
+ct = d.get('crashedThread'); th = d.get('threads') or []
+if isinstance(ct, int) and ct < len(th):
+    fr = th[ct].get('frames') or []
+    print('crashed frames:', [f.get('symbol') or ('image%d+0x%x' % (f.get('imageIndex'), f.get('imageOffset', 0))) for f in fr[:8]])
+imgs = d.get('usedImages') or []
+print('main image   :', (imgs[0].get('name') if imgs else None), imgs[0].get('path') if imgs else '')
+PY
     else
       echo "::error::no CarDash crash report in DiagnosticReports"
     fi
