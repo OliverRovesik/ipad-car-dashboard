@@ -80,20 +80,33 @@ echo "[sim] state=$ST after $((i * 4))s"
 [ "$ST" = "Booted" ] || die "simulator did not reach Booted (state=$ST)"
 
 step "install" xcrun simctl install "$UDID" "$OUT"
-TRACE="$HOME/Library/Developer/CoreSimulator/Devices/$UDID/data/Library/Application Support/CarDash/ci-trace.log"
+# 容器路径别猜：iOS app 沙盒在 Devices/<UDID>/data/Containers/Data/Application/<UUID>/ 下面
+CONT=$(xcrun simctl get_app_container "$UDID" "$BID" data 2>/dev/null || true)
+echo "[sim] data container: ${CONT:-<none returned>}"
+TRACE=""
+if [ -n "$CONT" ]; then TRACE="$CONT/Library/Application Support/CarDash/ci-trace.log"; fi
+if [ ! -s "$TRACE" ]; then
+  ALT=$(find "$HOME/Library/Developer/CoreSimulator/Devices/$UDID/data" -name ci-trace.log 2>/dev/null | head -1 || true)
+  [ -n "$ALT" ] && TRACE="$ALT"
+fi
 echo "[sim] launch (trace file: $TRACE)"
 step "launch" xcrun simctl launch "$UDID" "$BID"
+
+# 模拟器里的 app 就是宿主机进程，pgrep 比任何日志管道都直接
+ALIVE=no; if pgrep -f "CarDash.app/CarDash" >/dev/null 2>&1; then ALIVE=yes; fi
 
 # 轮询 app 自己写的容器文件，不再碰 simctl 的日志管道
 k=0; RES=quiet
 while [ "$k" -lt 12 ]; do
-  if [ -f "$TRACE" ]; then
+  if [ -s "$TRACE" ]; then
     if grep -q "load finished" "$TRACE"; then RES=ok; break; fi
     if grep -q "load failed" "$TRACE"; then RES=fail; break; fi
     if grep -q "launched" "$TRACE"; then RES=started; fi
   fi
   sleep 5; k=$((k + 1))
 done
+ALIVE2=no; if pgrep -f "CarDash.app/CarDash" >/dev/null 2>&1; then ALIVE2=yes; fi
+echo "::notice::alive after launch=$ALIVE, after $((k * 5))s=$ALIVE2, container=${CONT:-<none>}"
 
 echo "[sim] --- ci-trace.log ---"
 if [ -f "$TRACE" ]; then cat "$TRACE"; else echo "[sim] trace file absent"; fi
@@ -109,10 +122,12 @@ case "$RES" in
   ok)   echo "::notice::sim smoke PASSED: $DETAIL" ;;
   *)
     echo "::error::sim smoke FAILED ($RES): $DETAIL"
-    CR=$(ls -t ~/Library/Logs/DiagnosticReports/ 2>/dev/null | grep -i '^CarDash' | head -1 || true)
-    if [ -n "$CR" ]; then
-      echo "::error::crash report: $CR"
-      python3 - "$HOME/Library/Logs/DiagnosticReports/$CR" <<'PY' 2>&1 | sed 's/^/::error::/' | head -14
+    sleep 10   # .ips 是异步落盘的，立刻找会扑空
+    CRF=$(ls -t "$HOME"/Library/Logs/DiagnosticReports/*.ips 2>/dev/null | head -25 \
+          | xargs grep -l -i cardash 2>/dev/null | head -1 || true)
+    if [ -n "$CRF" ]; then
+      echo "::error::crash report: $CRF"
+      python3 - "$CRF" <<'PY' 2>&1 | sed 's/^/::error::/' | head -14
 import json, sys
 raw = open(sys.argv[1]).read().split('\n', 1)
 if len(raw) < 2:
