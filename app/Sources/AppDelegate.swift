@@ -81,7 +81,7 @@ final class AppDelegate: UIResponder, UIApplicationDelegate, WKNavigationDelegat
   // WKWebView 自己不会开新窗口，也不会触发 universal link，必须交回系统处理。
   func webView(_ w: WKWebView, createWebViewWith cfg: WKWebViewConfiguration,
                for act: WKNavigationAction, windowFeatures: WKWindowFeatures) -> WKWebView? {
-    if let u = act.request?.url { UIApplication.shared.open(u, options: [:], completionHandler: nil) }
+    if let u = act.request.url { UIApplication.shared.open(u, options: [:], completionHandler: nil) }
     return nil
   }
 
