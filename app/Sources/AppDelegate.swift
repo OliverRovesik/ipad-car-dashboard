@@ -99,12 +99,15 @@ final class AppDelegate: UIResponder, UIApplicationDelegate, WKNavigationDelegat
   }
 
   func webView(_ w: WKWebView, didFailProvisionalNavigation n: WKNavigation!, withError e: Error) {
+    NSLog("CARDASH: load failed %@", e.localizedDescription)
     show("Load failed: " + (e.localizedDescription))
   }
   func webView(_ w: WKWebView, didFail n: WKNavigation!, withError e: Error) {
+    NSLog("CARDASH: load failed %@", e.localizedDescription)
     show("Load failed: " + (e.localizedDescription))
   }
   func webView(_ w: WKWebView, didFinish n: WKNavigation!) {
+    NSLog("CARDASH: load finished %@", w.url?.absoluteString ?? "nil")
     status.isHidden = true
     web?.isHidden = false
   }

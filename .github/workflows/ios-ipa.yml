@@ -41,6 +41,11 @@ jobs:
           fi
           echo "::notice::ipa built: $(ls -la app/build/CarDash-unsigned.ipa | awk '{print $5}') bytes"
 
+      - name: Simulator smoke test
+        env:
+          DEPLOY_TARGET: ${{ github.event.inputs.deploy_target || '15.0' }}
+        run: sh app/simtest.sh
+
       - uses: actions/upload-artifact@v4
         with:
           name: CarDash-unsigned
