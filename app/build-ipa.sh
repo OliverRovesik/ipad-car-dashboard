@@ -15,7 +15,9 @@ echo "SDK: $SDK"
 rm -rf "$OUT"
 mkdir -p "$APP"
 
-xcrun swiftc -O -sdk "$SDK" -target "arm64-apple-ios$DEPLOY" \
+# xcrun --sdk <name> 负责配好工具链，别手写 -sdk：那样 clang 会拿 macOS 的 sysroot
+# 去 target iPhone，产出的二进制装不进设备（模拟器那边同理，见 simtest.sh）
+xcrun --sdk iphoneos swiftc -O -target "arm64-apple-ios$DEPLOY" \
   -framework UIKit -framework WebKit -framework CoreLocation \
   -o "$APP/$APP_NAME" "$ROOT"/app/Sources/*.swift
 
@@ -24,6 +26,7 @@ printf 'APPL' > "$APP/PkgInfo"
 plutil -insert CFBundleSupportedPlatforms -json '["iPhoneOS"]' "$APP/Info.plist"
 plutil -lint "$APP/Info.plist"
 printf 'LC_BUILD_VERSION: '; otool -l "$APP/$APP_NAME" | grep -A4 LC_BUILD_VERSION | grep -E 'platform|minos' | tr -s ' '
+echo "::notice::device binary build version: $(otool -l "$APP/$APP_NAME" | grep -A4 LC_BUILD_VERSION | grep -E 'platform|minos' | tr -s ' \n' ' ')"
 printf 'arch: '; lipo -archs "$APP/$APP_NAME" 2>/dev/null || file "$APP/$APP_NAME"
 
 (cd "$OUT" && rm -f "$APP_NAME-unsigned.ipa" && zip -qry "$APP_NAME-unsigned.ipa" Payload)
