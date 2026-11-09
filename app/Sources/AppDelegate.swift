@@ -59,6 +59,7 @@ final class AppDelegate: UIResponder, UIApplicationDelegate, WKNavigationDelegat
   func applicationDidFinishLaunching(_ app: UIApplication) {
     // 这就是整个 app 存在的理由：Safari 里 navigator.wakeLock 被拒，原生只能自己关掉息屏计时
     UIApplication.shared.isIdleTimerDisabled = true
+    NSLog("%@", "CARDASH: launched idleTimerDisabled=\(UIApplication.shared.isIdleTimerDisabled) url=\(DASH_URL)")
     loc.requestWhenInUseAuthorization()
   }
 

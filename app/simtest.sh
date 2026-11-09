@@ -55,28 +55,40 @@ echo "[sim] state=$ST after $((i * 4))s"
 
 echo "[sim] install"
 xcrun simctl install "$UDID" "$OUT"
-echo "[sim] launch"
-xcrun simctl launch "$UDID" "$BID"
+# 注意选项必须写在 destination 之前，simctl 会把 destination 之后的东西当程序参数
+echo "[sim] launch (capture stdout/stderr)"
+xcrun simctl launch --stdout "$SIM/out.log" --stderr "$SIM/err.log" "$UDID" "$BID"
+
+sleep 40
+echo "[sim] --- app stderr (tail) ---"
+tail -25 "$SIM/err.log" 2>/dev/null || echo "[sim] no stderr captured"
 
 RES=""; DETAIL=""
-j=0
-while [ "$j" -lt 14 ]; do
-  sleep 5; j=$((j + 1))
-  LOG=$(xcrun simctl spawn "$UDID" log show --style compact --last 3m \
-        --predicate 'eventMessage CONTAINS "CARDASH"' 2>/dev/null || true)
-  if echo "$LOG" | grep -q "CARDASH: load finished"; then
-    RES=ok; DETAIL=$(echo "$LOG" | grep "load finished" | tail -1); break
-  fi
-  if echo "$LOG" | grep -q "CARDASH: load failed"; then
-    RES=fail; DETAIL=$(echo "$LOG" | grep "load failed" | tail -1); break
-  fi
-done
+if grep -q "CARDASH: load finished" "$SIM/err.log" 2>/dev/null; then
+  RES=ok; DETAIL=$(grep "CARDASH: load finished" "$SIM/err.log" | tail -1)
+elif grep -q "CARDASH: load failed" "$SIM/err.log" 2>/dev/null; then
+  RES=fail; DETAIL=$(grep "CARDASH: load failed" "$SIM/err.log" | tail -1)
+else
+  RES=quiet; DETAIL="no CARDASH line in captured output"
+fi
+echo "[sim] captured lines: $(grep -c CARDASH "$SIM/err.log" 2>/dev/null || echo 0)"
+
 xcrun simctl terminate "$UDID" "$BID" 2>/dev/null || true
 xcrun simctl delete "$UDID" 2>/dev/null || true
 
 echo "[sim] result=$RES ($DETAIL)"
 case "$RES" in
-  ok)   echo "::notice::sim smoke PASSED after $((j * 5))s: $DETAIL" ;;
+  ok)   echo "::notice::sim smoke PASSED: $DETAIL" ;;
   fail) echo "::error::sim smoke FAILED, page did not load: $DETAIL"; exit 1 ;;
-  *)    echo "::error::sim smoke inconclusive: no CARDASH log line in 70s (app may not have launched)"; exit 1 ;;
+  *)
+    echo "::error::sim smoke inconclusive: $DETAIL — app likely died before launching"
+    CR=$(ls -t ~/Library/Logs/DiagnosticReports/ 2>/dev/null | grep -i cardash | head -1 || true)
+    if [ -n "$CR" ]; then
+      echo "::error::crash report: $CR"
+      grep -m6 -E "Exception Type|Termination Reason|Triggered by Thread|^CarDash" \
+        ~/Library/Logs/DiagnosticReports/"$CR" 2>/dev/null | sed 's/^/::error::/'
+    else
+      echo "::error::no CarDash crash report found in DiagnosticReports"
+    fi
+    exit 1 ;;
 esac
