@@ -78,28 +78,19 @@ echo "[sim] create device"
 UDID=$(tmo 60 xcrun simctl create cardash-smoke "$DT" "$RT" || true)
 [ -n "$UDID" ] || die "simctl create returned no udid"
 echo "[sim] boot $UDID"
-step "boot" tmo 90 xcrun simctl boot "$UDID"
-i=0; ST=""
-while [ "$i" -lt 30 ]; do
-  ST=$(tmo 25 xcrun simctl list devices -j | python3 -c "import json,sys
-d=json.load(sys.stdin)['devices']
-for rs in d.values():
-    for x in rs:
-        if x['udid']=='$UDID': print(x['state'])" 2>/dev/null || true)
-  if [ "$ST" = "Booted" ]; then break; fi
-  sleep 4; i=$((i + 1))
-done
-echo "[sim] state=$ST after $((i * 4))s"
-[ "$ST" = "Booted" ] || die "simulator did not reach Booted (state=$ST)"
+# bootstatus -b 自己等到启动完成：比轮询 simctl list 少一个会被慢服务饿死的环节
+step "boot" tmo 300 xcrun simctl bootstatus "$UDID" -b
+ST=Booted
+echo "[sim] state=$ST (bootstatus rc=0)"
 
 step "install" tmo 120 xcrun simctl install "$UDID" "$OUT"
-BUNDLE=$(tmo 25 xcrun simctl get_app_container "$UDID" "$BID" app 2>/dev/null || true)
+BUNDLE=$(tmo 60 xcrun simctl get_app_container "$UDID" "$BID" app 2>/dev/null || true)
 if [ -n "$BUNDLE" ]; then
   CAR=no; if [ -s "$BUNDLE/Assets.car" ]; then CAR=yes; fi
   echo "::notice::installed bundle icon: Assets.car=$CAR CFBundleIconName=$(plutil -extract CFBundleIconName raw "$BUNDLE/Info.plist" 2>/dev/null || echo missing)"
 fi
 # 容器路径别猜：iOS app 沙盒在 Devices/<UDID>/data/Containers/Data/Application/<UUID>/ 下面
-CONT=$(tmo 25 xcrun simctl get_app_container "$UDID" "$BID" data 2>/dev/null || true)
+CONT=$(tmo 60 xcrun simctl get_app_container "$UDID" "$BID" data 2>/dev/null || true)
 echo "[sim] data container: ${CONT:-<none returned>}"
 TRACE=""
 if [ -n "$CONT" ]; then TRACE="$CONT/Library/Application Support/CarDash/ci-trace.log"; fi
@@ -116,6 +107,17 @@ ALIVE=no; if pgrep -f "CarDash.app/CarDash" >/dev/null 2>&1; then ALIVE=yes; fi
 # 轮询 app 自己写的容器文件，不再碰 simctl 的日志管道
 k=0; RES=quiet
 while [ "$k" -lt 12 ]; do
+  # 容器查询在慢 runner 上可能几分钟才返回：路径没拿到就每轮重拿，
+  # 否则 app 后来写出的 trace 永远没人读（#14 就是这么误判 quiet 的）
+  if [ ! -s "$TRACE" ]; then
+    # find 走文件系统、不经过 CoreSimulator 服务：慢/楔死的服务不影响它
+    ALT=$(find "$HOME/Library/Developer/CoreSimulator/Devices" -name ci-trace.log 2>/dev/null | head -1 || true)
+    if [ -n "$ALT" ]; then TRACE="$ALT"; fi
+    if [ ! -s "$TRACE" ]; then
+      CONT=$(tmo 60 xcrun simctl get_app_container "$UDID" "$BID" data 2>/dev/null || true)
+      if [ -n "$CONT" ]; then TRACE="$CONT/Library/Application Support/CarDash/ci-trace.log"; fi
+    fi
+  fi
   if [ -s "$TRACE" ]; then
     if grep -q "load finished" "$TRACE"; then RES=ok; break; fi
     if grep -q "load failed" "$TRACE"; then RES=fail; break; fi
