@@ -63,8 +63,12 @@ final class LyricsBridge {
     lastFullSignature = ""
 
     #if targetEnvironment(simulator)
+    // 打点不能只放在异步回读里：注入链没走到时，CI 里连"分支进没进"都看不出来
+    cardashTrace("lyrics sim branch")
     pushDemo()
     return
+    #else
+    cardashTrace("lyrics device branch")
     #endif
 
     if timer == nil {
@@ -361,11 +365,23 @@ final class LyricsBridge {
     DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
       guard let self = self else { return }
       self.pushFull(force: true)
-      // 读回页面 DOM：注入链断了（比如页面没暴露 CarDashLyrics）会在这里显形，而不是只看到一张空卡
-      self.web?.evaluateJavaScript(
-        "JSON.stringify({api:typeof CarDashLyrics,rows:document.querySelectorAll('#lyrList li').length,title:document.getElementById('lyrTitle').textContent})"
-      ) { r, e in
-        cardashTrace("lyrics demo push result=\(r as? String ?? "nil") err=\(e?.localizedDescription ?? "nil")")
+      self.verifyDemo(attempt: 0)
+    }
+  }
+
+  // 读回页面 DOM：注入链断了（比如页面没暴露 CarDashLyrics）会在这里显形。
+  // WebKit 的 evaluateJavaScript 会排在页面自己的长任务后面，慢 runner 上第一次回读
+  // 可能落到 CI dump 之后，所以每秒重试，直到行数对上（或放弃，由 trace 说明原因）。
+  private func verifyDemo(attempt: Int) {
+    guard let v = web else { return }
+    v.evaluateJavaScript(
+      "JSON.stringify({api:typeof CarDashLyrics,rows:document.querySelectorAll('#lyrList li').length,title:document.getElementById('lyrTitle')?document.getElementById('lyrTitle').textContent:null})"
+    ) { [weak self] r, e in
+      let s = (r as? String) ?? "nil"
+      cardashTrace("lyrics demo push result=\(s) err=\(e?.localizedDescription ?? "nil") attempt=\(attempt)")
+      if s.contains("\"rows\":30") { return }
+      if attempt < 9 {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1) { self?.verifyDemo(attempt: attempt + 1) }
       }
     }
   }

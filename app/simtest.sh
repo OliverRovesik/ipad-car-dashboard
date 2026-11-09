@@ -132,9 +132,16 @@ done
 ALIVE2=no; if pgrep -f "CarDash.app/CarDash" >/dev/null 2>&1; then ALIVE2=yes; fi
 echo "::notice::alive after launch=$ALIVE, after $((k * 5))s=$ALIVE2, container=${CONT:-<none>}"
 
-# 探针行一出现就 break，而模拟器的歌词演示在 didFinish 后 0.3s 才注入、还要回读 DOM；
-# 稍等再 dump，否则会稳定误判成"歌词没渲染"
-if [ "$RES" = "ok" ]; then sleep 2; fi
+# 探针行一出现就 break，而模拟器的歌词演示是 didFinish 后 0.3s 才注入、还要回读 DOM，
+# 慢 runner 上可能晚几秒；固定 sleep 2 会随机误判。这里等歌词结果行真正落盘，最多 20s。
+if [ "$RES" = "ok" ]; then
+  lk=0
+  while [ "$lk" -lt 20 ]; do
+    if [ -f "$TRACE" ] && grep -q 'lyrics demo push result=.*"rows":30' "$TRACE"; then break; fi
+    sleep 1; lk=$((lk + 1))
+  done
+  echo "[sim] waited ${lk}s for lyrics demo rows"
+fi
 
 echo "[sim] --- ci-trace.log ---"
 if [ -f "$TRACE" ]; then cat "$TRACE"; else echo "[sim] trace file absent"; fi
