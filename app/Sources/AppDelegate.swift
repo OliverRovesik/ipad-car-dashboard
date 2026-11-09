@@ -15,6 +15,7 @@ final class AppDelegate: UIResponder, UIApplicationDelegate, WKNavigationDelegat
   let status = UILabel()
 
   func application(_ app: UIApplication, willFinishLaunchingWithOptions o: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
+    trace("willFinish entered")
     let w = UIWindow(frame: UIScreen.main.bounds)
     w.backgroundColor = UIColor(white: 0.06, alpha: 1)
 
@@ -56,21 +57,8 @@ final class AppDelegate: UIResponder, UIApplicationDelegate, WKNavigationDelegat
     return true
   }
 
-  // CI 用容器里的这个文件判断 app 到底跑到哪一步：runner 上模拟器的日志抓取（log stream /
-  // --console）不可靠，而沙盒容器在宿主机上可以直接读。
-  func trace(_ s: String) {
-    NSLog("%@", "CARDASH: " + s)
-    guard let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first else { return }
-    let dir = base.appendingPathComponent("CarDash", isDirectory: true)
-    try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-    let f = dir.appendingPathComponent("ci-trace.log")
-    let data = (s + "\n").data(using: .utf8) ?? Data()
-    if let h = try? FileHandle(forWritingTo: f) {
-      h.seekToEndOfFile(); h.write(data); try? h.close()
-    } else {
-      try? data.write(to: f)
-    }
-  }
+  // CI 判据通道见 Trace.swift：runner 上模拟器的日志抓取不可靠，容器里的文件在宿主机直接可读
+  func trace(_ s: String) { cardashTrace(s) }
 
   func applicationDidFinishLaunching(_ app: UIApplication) {
     // 这就是整个 app 存在的理由：Safari 里 navigator.wakeLock 被拒，原生只能自己关掉息屏计时

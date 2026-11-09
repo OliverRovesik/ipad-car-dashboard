@@ -86,7 +86,7 @@ step "launch" xcrun simctl launch "$UDID" "$BID"
 
 # 轮询 app 自己写的容器文件，不再碰 simctl 的日志管道
 k=0; RES=quiet
-while [ "$k" -lt 20 ]; do
+while [ "$k" -lt 12 ]; do
   if [ -f "$TRACE" ]; then
     if grep -q "load finished" "$TRACE"; then RES=ok; break; fi
     if grep -q "load failed" "$TRACE"; then RES=fail; break; fi
@@ -121,16 +121,19 @@ try:
     d = json.loads(raw[1])
 except Exception as e:
     print('cannot parse .ips json:', e); print(raw[1][:500]); raise SystemExit
-print('exception   :', d.get('exception'))
-print('termination :', d.get('termination'))
-print('asiBacktrace:', d.get('asiBacktrace'))
-print('codesigning :', d.get('codesigning'))
-ct = d.get('crashedThread'); th = d.get('threads') or []
-if isinstance(ct, int) and ct < len(th):
-    fr = th[ct].get('frames') or []
-    print('crashed frames:', [f.get('symbol') or ('image%d+0x%x' % (f.get('imageIndex'), f.get('imageOffset', 0))) for f in fr[:8]])
 imgs = d.get('usedImages') or []
-print('main image   :', (imgs[0].get('name') if imgs else None), imgs[0].get('path') if imgs else '')
+def nm(f):
+    i = f.get('imageIndex'); s = f.get('symbol') or hex(f.get('imageOffset', 0))
+    iname = imgs[i].get('name') if isinstance(i, int) and i < len(imgs) else None
+    return (iname + ' ' if iname else '') + s
+print('exception   :', d.get('exception'))
+print('termination :', (d.get('termination') or {}).get('indicator'), (d.get('termination') or {}).get('details'))
+print('reason      :', d.get('exceptionReason'))
+leb = d.get('lastExceptionBacktrace') or []
+if leb: print('EXC BACKTRACE:', ' < '.join(nm(f) for f in leb[:9]))
+th = d.get('threads') or []
+tg = [t for t in th if t.get('triggered')]
+if tg: print('TRIGGERED:', ' < '.join(nm(f) for f in (tg[0].get('frames') or [])[:9]))
 PY
     else
       echo "::error::no CarDash crash report in DiagnosticReports"
