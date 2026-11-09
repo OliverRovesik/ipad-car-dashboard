@@ -34,11 +34,11 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate, WKNavigationDeleg
     if #available(iOS 16.4, *) { v.isInspectable = true }
     v.underPageBackgroundColor = w.backgroundColor
     root.view.addSubview(v)
-    // 贴安全区而不是铺满 bounds：iPadOS 26 窗口化时系统状态栏会盖在内容上，
-    // 页面自己的顶栏必须从 inset 下面开始，否则被时间/电量压住。
+    // 顶边贴安全区避免系统状态栏压住页面；底边铺到窗口边缘，
+    // 否则 Home Indicator 那条安全区会露出 root 的黑色背景（页面已用 env(safe-area-inset-bottom) 让位）。
     NSLayoutConstraint.activate([
       v.topAnchor.constraint(equalTo: root.view.safeAreaLayoutGuide.topAnchor),
-      v.bottomAnchor.constraint(equalTo: root.view.safeAreaLayoutGuide.bottomAnchor),
+      v.bottomAnchor.constraint(equalTo: root.view.bottomAnchor),
       v.leadingAnchor.constraint(equalTo: root.view.safeAreaLayoutGuide.leadingAnchor),
       v.trailingAnchor.constraint(equalTo: root.view.safeAreaLayoutGuide.trailingAnchor)
     ])
@@ -125,6 +125,13 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate, WKNavigationDeleg
     }
     UIApplication.shared.open(u, options: [:], completionHandler: nil)
     decisionHandler(.cancel)
+  }
+
+  // 长按不弹系统上下文菜单（全选/拷贝/打开链接）；文本选择本身由页面 CSS 的 user-select:none 关掉。
+  @available(iOS 13.0, *)
+  func webView(_ w: WKWebView, contextMenuConfigurationForElement elementInfo: WKContextMenuElementInfo,
+               completionHandler: @escaping (UIContextMenuConfiguration?) -> Void) {
+    completionHandler(nil)
   }
 
   func webView(_ w: WKWebView, didFailProvisionalNavigation n: WKNavigation!, withError e: Error) {
