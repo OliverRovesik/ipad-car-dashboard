@@ -78,7 +78,7 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate, WKNavigationDeleg
     cardashTrace("scene connected")
     if #available(iOS 16.0, *) {
       let sr = ws.sizeRestrictions
-      cardashTrace("scene geometry bounds=\(ws.effectiveGeometry.coordinateSpace.bounds) orientation=\(ws.interfaceOrientation.rawValue) restrictions=\(sr.map { "min=\($0.minimumSize) max=\($0.maximumSize)" } ?? "nil")")
+      cardashTrace("scene geometry bounds=\(ws.coordinateSpace.bounds) orientation=\(ws.interfaceOrientation.rawValue) restrictions=\(sr.map { "min=\($0.minimumSize) max=\($0.maximumSize)" } ?? "nil")")
     }
     load()
   }
@@ -167,6 +167,6 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate, WKNavigationDeleg
   @available(iOS 16.0, *)
   func windowScene(_ ws: UIWindowScene, didUpdateEffectiveGeometry prev: UIWindowScene.Geometry) {
     let g = ws.effectiveGeometry
-    cardashTrace("scene resize bounds=\(g.coordinateSpace.bounds) interactive=\(g.isInteractivelyResizing)")
+    cardashTrace("scene resize bounds=\(ws.coordinateSpace.bounds) interactive=\(g.isInteractivelyResizing)")
   }
 }
