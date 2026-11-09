@@ -59,6 +59,7 @@ case "$BV" in *platform*7*) ;; *) echo "::error::simulator binary is not platfor
 
 cp "$ROOT/app/Info.plist" "$OUT/Info.plist"
 printf 'APPL' > "$OUT/PkgInfo"
+step "icon" sh "$ROOT/app/icon.sh" iphonesimulator "$OUT" "$SIM/icon-partial.plist"
 plutil -insert CFBundleSupportedPlatforms -json '["iPhoneSimulator"]' "$OUT/Info.plist"
 step "ad-hoc-sign" codesign --force --sign - "$OUT"
 
@@ -80,6 +81,11 @@ echo "[sim] state=$ST after $((i * 4))s"
 [ "$ST" = "Booted" ] || die "simulator did not reach Booted (state=$ST)"
 
 step "install" xcrun simctl install "$UDID" "$OUT"
+BUNDLE=$(xcrun simctl get_app_container "$UDID" "$BID" app 2>/dev/null || true)
+if [ -n "$BUNDLE" ]; then
+  CAR=no; if [ -s "$BUNDLE/Assets.car" ]; then CAR=yes; fi
+  echo "::notice::installed bundle icon: Assets.car=$CAR CFBundleIconName=$(plutil -extract CFBundleIconName raw "$BUNDLE/Info.plist" 2>/dev/null || echo missing)"
+fi
 # 容器路径别猜：iOS app 沙盒在 Devices/<UDID>/data/Containers/Data/Application/<UUID>/ 下面
 CONT=$(xcrun simctl get_app_container "$UDID" "$BID" data 2>/dev/null || true)
 echo "[sim] data container: ${CONT:-<none returned>}"
