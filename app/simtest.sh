@@ -120,7 +120,8 @@ while [ "$k" -lt 12 ]; do
     fi
   fi
   if [ -s "$TRACE" ]; then
-    if grep -q "load finished" "$TRACE"; then RES=ok; break; fi
+    # 探针行在 didFinish 之后才写，它出现就等于加载成功；只等 load finished 会在探针落盘前 break
+    if grep -q "probe [0-9]*: " "$TRACE"; then RES=ok; break; fi
     if grep -q "load failed" "$TRACE"; then RES=fail; break; fi
     if grep -q "launched" "$TRACE"; then RES=started; fi
   fi
@@ -134,6 +135,8 @@ if [ -f "$TRACE" ]; then cat "$TRACE"; else echo "[sim] trace file absent"; fi
 echo "::notice::trace after $((k * 5))s (result=$RES): $(tr '\n' '|' < "$TRACE" 2>/dev/null || echo '<no file>')"
 
 DETAIL=$(tail -1 "$TRACE" 2>/dev/null || echo "no trace file")
+# trace 在模拟器容器里，simctl delete 会连它一起删掉；断言的 grep 必须读副本
+if [ -f "$TRACE" ]; then cp "$TRACE" "$SIM/final-trace.log"; TRACE="$SIM/final-trace.log"; fi
 tmo 30 xcrun simctl terminate "$UDID" "$BID" >/dev/null 2>&1 || true
 tmo 30 xcrun simctl delete "$UDID" >/dev/null 2>&1 || true
 

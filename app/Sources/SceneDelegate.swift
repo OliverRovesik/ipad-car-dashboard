@@ -76,6 +76,10 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate, WKNavigationDeleg
     window = w
     w.makeKeyAndVisible()
     cardashTrace("scene connected")
+    if #available(iOS 16.0, *) {
+      let sr = ws.sizeRestrictions
+      cardashTrace("scene geometry bounds=\(ws.effectiveGeometry.coordinateSpace.bounds) orientation=\(ws.interfaceOrientation.rawValue) restrictions=\(sr.map { "min=\($0.minimumSize) max=\($0.maximumSize)" } ?? "nil")")
+    }
     load()
   }
 
@@ -142,7 +146,7 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate, WKNavigationDeleg
   // 内置页面是否真的在 WebKit 里跑起来了，只有问页面自己才知道：
   // secure context 决定定位能不能用，__FIESTA_GLB/three/renderer 证明内联脚本执行了，
   // __car 是模型加载成功回调（dashboard-gps.html:857）留下的记号。模型是异步解析的，所以要重试。
-  private static let probeJS = "JSON.stringify({secure:navigator.isSecureContext,geo:typeof navigator.geolocation,three:typeof THREE,glb:(window.__FIESTA_GLB||'').length,renderer:typeof renderer,car:window.__car?window.__car.size:null,canvas:!!document.querySelector('#scene canvas')})"
+  private static let probeJS = "JSON.stringify({secure:window.isSecureContext,geo:typeof navigator.geolocation,three:typeof THREE,glb:(window.__FIESTA_GLB||'').length,renderer:typeof renderer,car:window.__car?window.__car.size:null,canvas:!!document.querySelector('#scene canvas')})"
 
   private func probe(_ n: Int) {
     guard let v = web else { return }
@@ -158,5 +162,11 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate, WKNavigationDeleg
   func sceneDidBecomeActive(_ scene: UIScene) {
     UIApplication.shared.isIdleTimerDisabled = true
     if let v = web, v.estimatedProgress < 0.99 { load() }
+  }
+
+  @available(iOS 16.0, *)
+  func windowScene(_ ws: UIWindowScene, didUpdateEffectiveGeometry prev: UIWindowScene.Geometry) {
+    let g = ws.effectiveGeometry
+    cardashTrace("scene resize bounds=\(g.coordinateSpace.bounds) interactive=\(g.isInteractivelyResizing)")
   }
 }

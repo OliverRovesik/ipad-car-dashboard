@@ -27,7 +27,7 @@ sh "$ROOT/app/icon.sh" iphoneos "$APP" "$OUT/icon-partial.plist"
 sh "$ROOT/app/embed-web.sh" "$APP"
 plutil -insert CFBundleSupportedPlatforms -json '["iPhoneOS"]' "$APP/Info.plist"
 plutil -lint "$APP/Info.plist"
-printf 'LC_BUILD_VERSION: '; otool -l "$APP/$APP_NAME" | grep -A4 LC_BUILD_VERSION | grep -E 'platform|minos' | tr -s ' '
+printf 'LC_BUILD_VERSION: '; otool -l "$APP/$APP_NAME" | grep -A4 LC_BUILD_VERSION | grep -E 'platform|minos|sdk' | tr -s ' '
 BV=$(otool -l "$APP/$APP_NAME" | grep -A4 LC_BUILD_VERSION | grep -E 'platform|minos' | tr -s ' \n' ' ')
 echo "::notice::device binary build version:$BV"
 case "$BV" in

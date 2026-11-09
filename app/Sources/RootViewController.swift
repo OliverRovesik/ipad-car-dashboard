@@ -4,7 +4,7 @@ import UIKit
 final class RootViewController: UIViewController {
   override var prefersStatusBarHidden: Bool { true }
   override var prefersHomeIndicatorAutoHidden: Bool { true }
-  override var supportedInterfaceOrientations: UIInterfaceOrientationMask { .landscape }
+  override var supportedInterfaceOrientations: UIInterfaceOrientationMask { .all }
 
   private var lastLayout = ""
 
