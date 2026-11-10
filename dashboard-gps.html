@@ -232,10 +232,8 @@
 </div>
 
 <div class="ov" id="obd">
-  <div class="card" id="cAcc"><span>Accel</span><b id="vAcc">—</b></div>
   <div class="card" id="cAvg"><span>Avg speed</span><b id="vAvg">—</b></div>
   <div class="card" id="cPrec"><span>Accuracy</span><b id="vPrec">—</b></div>
-  <div class="card" id="cHead"><span>Heading</span><b id="vHead">—</b></div>
 </div>
 </div>
 
@@ -988,20 +986,15 @@ function updateFade(){
 /* ---------- 读数 ---------- */
 let tripKm = 0, lastTs = 0, wasDark = null;
 document.getElementById('trip').onclick = ()=>{ tripKm = 0; };
-const COMPASS = ['N','NE','E','SE','S','SW','W','NW'];
 function paint(){
   document.getElementById('speed').textContent = Math.round(shown.speed);
   document.getElementById('vTrip').textContent = tripKm.toFixed(1);
 
-  document.getElementById('vAcc').textContent  = (aSmooth>=0?'+':'') + aSmooth.toFixed(1);
-  document.getElementById('cAcc').className = 'card'+(aSmooth<-1.5?' warn':'');
   document.getElementById('vAvg').textContent  = tripKm>0.05 && G.movingSec>20
     ? (tripKm/(G.movingSec/3600)).toFixed(0) : '—';
   const acc = G.acc;
   document.getElementById('vPrec').textContent = acc===null ? '—' : acc.toFixed(0)+'m';
   document.getElementById('cPrec').className = 'card'+(acc===null?'':acc>30?' bad':acc>15?' warn':'');
-  document.getElementById('vHead').textContent = G.head===null ? '—'
-    : G.head.toFixed(0)+'° '+COMPASS[Math.round((G.head%360)/45)%8];
 
   const st = (!D.connected || CAM.mode==='park') ? 'P' : (shown.speed<2 ? 'N' : 'D');
   document.querySelectorAll('#gearrow i').forEach(i=>i.classList.toggle('dim', i.dataset.g!==st));
