@@ -36,7 +36,7 @@
     display:flex;align-items:flex-start;align-content:flex-start;justify-content:space-between;
     flex-wrap:wrap;gap:clamp(8px,1.2vw,18px)}
   #topbar .ov{position:static;z-index:auto}
-  #topbar span, #topbar b, #topbar .lamp, #clockwx{white-space:nowrap}
+  #topbar span, #topbar b, #clockwx{white-space:nowrap}
 
   /* 左上：档位 + 车速 */
   #topleft{display:flex;flex-direction:column;gap:2px;flex:0 0 auto}
@@ -49,14 +49,6 @@
   #speed{font-size:clamp(52px,7.6vw,104px);font-weight:300;line-height:.86;
     letter-spacing:-.04em;font-variant-numeric:tabular-nums}
   #speedunit{font-size:17px;color:var(--sub);font-weight:600;margin-top:2px}
-
-  /* 左侧告警灯 */
-  #rail{display:flex;flex-direction:column;gap:clamp(6px,1.2vh,13px);
-    margin-top:clamp(10px,2.4vh,28px)}
-  .lamp{display:flex;align-items:center;gap:9px;font-size:clamp(11px,1.15vw,13.5px);
-    color:var(--sub);font-weight:600}
-  .lamp svg{width:26px;height:20px;stroke:currentColor;fill:none;stroke-width:1.8}
-  .lamp.bad{color:var(--red)}
 
   /* 右上：OBD 读数 */
   #obd{display:flex;gap:clamp(6px,.8vw,10px);flex-wrap:wrap;justify-content:flex-end;
@@ -130,11 +122,11 @@
   #load.bad{color:var(--red)}
   #load.hidden{display:none}
 
-  /* 滚动歌词：嵌在顶栏第一行、车速栏右侧的空位（车上那个红框位置），默认 2 行：
+  /* 滚动歌词：浮动卡片，默认落在速度块下方，可整张拖到屏幕任意位置；默认 2 行：
      当前行顶格加粗、下一行淡显；字体尽量大，开车扫一眼能读。
-     拉右边改宽度、拉下边改行数（1–6 行）、右下角两个一起改；尺寸记进 localStorage，下次启动还在。
+     拉右边改宽度、拉下边改行数（1–6 行）、右下角两个一起改；位置和尺寸都记进 localStorage。
      数据来自原生壳（Apple Music 的 now-playing 状态 + 专辑封面），网页只负责按时间轴滚动。 */
-  #lyrics{width:clamp(232px,19vw,248px);margin-top:clamp(6px,2.2vh,20px);align-self:flex-start;
+  #lyrics{width:clamp(232px,19vw,248px);
     position:relative;
     background:var(--card);-webkit-backdrop-filter:blur(16px);backdrop-filter:blur(16px);
     border:1px solid var(--line);border-radius:16px;
@@ -143,8 +135,9 @@
     box-shadow:0 14px 36px rgba(8,14,22,.16)}
   #lyrics.hidden{display:none}
   #lyrics.sizing{border-color:var(--sub)}
-  /* 顶栏里 .ov 一律被改成 static，这里要挂住三个绝对定位的拉伸手柄，重新相对定位。 */
-  #topbar #lyrics{position:relative}
+  #lyrics.dragging{cursor:grabbing;border-color:var(--sub)}
+  /* 顶栏里 .ov 一律被改成 static；歌词卡是浮动层，脱离顶栏排版、可拖到屏幕任意位置。 */
+  #topbar #lyrics{position:fixed;z-index:6;touch-action:none}
   #lyrHead{display:flex;align-items:center;gap:8px}
   #lyrArt{width:40px;height:40px;border-radius:10px;object-fit:cover;flex:0 0 auto;
     background:rgba(120,132,148,.16)}
@@ -188,11 +181,6 @@
   #lyrSzSE::before{content:'';position:absolute;right:7px;bottom:7px;width:10px;height:10px;
     border-right:2px solid var(--sub);border-bottom:2px solid var(--sub);
     border-radius:0 0 8px 0;opacity:.6}
-  /* 窗口被压得太小时没有空位：窄窗顶栏会把 OBD 卡片折到第二行，
-     矮窗则会撞上右下角的 Trip。宁可整张卡不显示，也不让它盖住读数。 */
-  @media (max-width:420px){ #lyrics,#lyrOpen{display:none} }
-  @media (max-width:620px) and (max-height:720px){ #lyrics,#lyrOpen{display:none} }
-  @media (max-height:560px){ #lyrics,#lyrOpen{display:none} }
 
   /* iPad 开夜间模式时整屏跟着变暗 */
   @media (prefers-color-scheme: dark){
@@ -214,11 +202,6 @@
     <i data-g="N">N</i><i data-g="D" class="dim">D</i><span id="ready">READY</span></div>
   <div id="speed">0</div>
   <div id="speedunit">km/h</div>
-<div class="ov" id="rail">
-  <div class="lamp" id="lampFix"><svg viewBox="0 0 30 20"><path d="M15 3v14M8 9l7-6 7 6"/><circle cx="15" cy="17" r="2"/></svg>No fix</div>
-  <div class="lamp" id="lampAcc"><svg viewBox="0 0 30 20"><circle cx="15" cy="10" r="6"/><path d="M15 16v4M9 10H5M21 10h4"/></svg>Accuracy unknown</div>
-  <div class="lamp" id="lampSrc"><svg viewBox="0 0 30 20"><path d="M4 16h6l4-8 4 8h8"/></svg>Speed source —</div>
-</div>
 </div>
 
 <!-- 滚动歌词：原生壳用 window.CarDashLyrics.setTrack/sync 推当前曲目、封面和播放进度，
@@ -265,6 +248,8 @@
   <a class="fav" target="_blank" rel="noopener" href="https://www.google.com/maps/dir/?api=1&amp;travelmode=driving&amp;dir_action=navigate&amp;destination=14.6342128,121.0166671">🏠 Home</a>
   <a class="fav" target="_blank" rel="noopener" href="https://www.google.com/maps/dir/?api=1&amp;travelmode=driving&amp;dir_action=navigate&amp;destination=14.6685938,121.0116962">💼 Work</a>
   <a class="fav" target="_blank" rel="noopener" href="https://www.google.com/maps/dir/?api=1&amp;travelmode=driving&amp;dir_action=navigate&amp;destination=14.5564398,120.9956354">❤️</a>
+  <!-- 谷歌地图没有对外"结束导航"的接口；这个按钮把谷歌地图交回前台（导航中会直接回到导航页），✕ 在它那页里按 -->
+  <a class="fav" target="_blank" rel="noopener" href="comgooglemaps://">✕ End Nav</a>
   <!-- GET 表单让浏览器自己拼 query=，零 JS、不受弹窗拦截，页面本身不被导航走。
        api=1 必须是隐藏字段：规范里表单 GET 会用自己序列化出的 query 整体替换 action 上的 query。 -->
   <form id="search" method="GET" target="_blank" rel="noopener"
@@ -1022,11 +1007,6 @@ function paint(){
   document.querySelectorAll('#gearrow i').forEach(i=>i.classList.toggle('dim', i.dataset.g!==st));
   document.getElementById('ready').textContent = D.connected?'READY':'OFF';
   document.getElementById('ready').className   = D.connected?'':'off';
-  document.getElementById('lampFix').className = 'lamp'+(D.connected?' on':' bad');
-  document.getElementById('lampFix').lastChild.textContent = D.connected?'Position fixed':'No fix yet';
-  document.getElementById('lampAcc').className = 'lamp'+(acc===null?'':acc>30?' bad':' on');
-  document.getElementById('lampAcc').lastChild.textContent = 'Accuracy '+(acc===null?'n/a':acc.toFixed(0)+'m');
-  document.getElementById('lampSrc').lastChild.textContent = 'Speed source '+G.src;
 }
 
 function loop(ts){
@@ -1244,7 +1224,8 @@ const LYR = {
   base: 0, baseAt: 0, playing: false, rate: 1,
   idx: -2,
   w: 0,          // 0 = 用 CSS 默认宽度；拖动后是用户拉的像素
-  rows: 2        // 可见行数 1–6（拉下边改）
+  rows: 2,       // 可见行数 1–6（拉下边改）
+  x: null, y: null   // 浮动卡片左上角；null = 还没摆过，默认落在速度块下面
 };
 const lyrEl = document.getElementById('lyrics');
 const lyrList = document.getElementById('lyrList');
@@ -1301,6 +1282,7 @@ function lyrChrome(){
   const show = LYR.on && (!!LYR.title || LYR.status === 'denied');
   lyrEl.classList.toggle('hidden', !show);
   lyrOpen.classList.toggle('hidden', !(LYR.title && !LYR.on));
+  if(show) lyrClampPlace();             // 藏着时量不到尺寸，显示出来再夹一次
 }
 function lyrSetTrack(j){
   if(!j || typeof j !== 'object') return;
@@ -1375,6 +1357,7 @@ function lyrApplySize(){
   lyrView.style.setProperty('--rows', LYR.rows);
   lyrView.dataset.rows = LYR.rows;
   LYR.idx = -2;                       // 行高一变，滚动偏移要立刻重画
+  lyrClampPlace();                    // 变宽/变高后重新夹回屏幕内
 }
 function lyrSaveSize(){
   const w = LYR.w > 0 ? LYR.w : Math.round(lyrEl.getBoundingClientRect().width);
@@ -1386,10 +1369,13 @@ function lyrSaveSize(){
     LYR.w = Math.min(Math.max(+m[1], LYR_MINW), LYR_MAXW);
     LYR.rows = Math.min(Math.max(+m[2], LYR_MINROWS), LYR_MAXROWS);
   }
+  const p = /^(\d+),(\d+)$/.exec(lyrStore('lyrics.pos') || '');
+  if(p){ LYR.x = +p[1]; LYR.y = +p[2]; }
   lyrApplySize();
 })();
 addEventListener('resize', () => {
   if(LYR.w > lyrMaxW()){ LYR.w = lyrMaxW(); lyrApplySize(); }
+  lyrClampPlace();
 });
 function lyrBindSize(el, dir){
   el.addEventListener('pointerdown', e => {
@@ -1420,6 +1406,55 @@ function lyrBindSize(el, dir){
 lyrBindSize(document.getElementById('lyrSzE'), 'e');
 lyrBindSize(document.getElementById('lyrSzS'), 's');
 lyrBindSize(document.getElementById('lyrSzSE'), 'se');
+
+// —— 整张卡片随意拖位置：没摆过时默认落在速度块正下方，摆过就用 localStorage 里的坐标。
+function lyrPlace(){
+  if(LYR.x === null || LYR.y === null){
+    // 左边缘跟速度块对齐；顶边取整条顶栏下面 —— 窄窗口里 OBD 卡片会换到第二行，
+    // 只按 #topleft 的下沿摆会正好压在它们上面。
+    const tl = document.getElementById('topleft').getBoundingClientRect();
+    const tb = document.getElementById('topbar').getBoundingClientRect();
+    LYR.x = Math.round(tl.left);
+    LYR.y = Math.round(Math.max(tl.bottom, tb.bottom) + 8);
+  }
+  lyrEl.style.left = Math.round(LYR.x) + 'px';
+  lyrEl.style.top = Math.round(LYR.y) + 'px';
+}
+function lyrClampPlace(){
+  lyrPlace();
+  const r = lyrEl.getBoundingClientRect();
+  if(!r.width) return;                // 卡片藏着时量不到，等显示出来再夹
+  LYR.x = Math.min(Math.max(LYR.x, 4), Math.max(4, innerWidth - r.width - 4));
+  LYR.y = Math.min(Math.max(LYR.y, 4), Math.max(4, innerHeight - r.height - 4));
+  lyrPlace();
+}
+lyrPlace();
+lyrEl.addEventListener('pointerdown', e => {
+  if(e.target.closest('.lyrBtn,.lyrSz')) return;   // ✕ 和拉边框各管各的
+  const x0 = e.clientX, y0 = e.clientY, px0 = LYR.x, py0 = LYR.y;
+  let moved = false;
+  try{ lyrEl.setPointerCapture(e.pointerId); }catch(err){}
+  const move = ev => {
+    const dx = ev.clientX - x0, dy = ev.clientY - y0;
+    if(!moved){
+      if(Math.abs(dx) < 8 && Math.abs(dy) < 8) return;   // 8px 以内算点击，别误拖
+      moved = true;
+      lyrEl.classList.add('dragging');
+    }
+    LYR.x = px0 + dx; LYR.y = py0 + dy;
+    lyrClampPlace();
+  };
+  const up = () => {
+    lyrEl.removeEventListener('pointermove', move);
+    lyrEl.removeEventListener('pointerup', up);
+    lyrEl.removeEventListener('pointercancel', up);
+    lyrEl.classList.remove('dragging');
+    if(moved) lyrStore('lyrics.pos', Math.round(LYR.x) + ',' + Math.round(LYR.y));
+  };
+  lyrEl.addEventListener('pointermove', move);
+  lyrEl.addEventListener('pointerup', up);
+  lyrEl.addEventListener('pointercancel', up);
+});
 
 // 浏览器里没有原生壳：?lyricsdemo / #lyricsdemo 塞一份假时间轴，用来验证滚动和布局
 window.CarDashLyrics = { setTrack: lyrSetTrack, sync: lyrSync };
