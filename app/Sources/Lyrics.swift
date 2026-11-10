@@ -1,5 +1,6 @@
 import Foundation
 import MediaPlayer
+import UIKit
 import WebKit
 import CryptoKit
 
@@ -44,6 +45,7 @@ final class LyricsBridge {
   private var duration: Double = 0
   private var lastFullSignature = ""
   private var lyricsTask: URLSessionDataTask?
+  private var demoArt = ""
 
   private let player = MPMusicPlayerController.systemMusicPlayer
 
@@ -332,6 +334,7 @@ final class LyricsBridge {
       "playing": state == .playing,
       "position": max(0, player.currentPlaybackTime),
       "rate": state == .playing ? 1.0 : 0.0,
+      "art": artworkURL(),
       "lines": lineArr
     ]
     guard JSONSerialization.isValidJSONObject(obj),
@@ -352,11 +355,22 @@ final class LyricsBridge {
     web?.evaluateJavaScript("window.CarDashLyrics&&CarDashLyrics.sync(\(json))", completionHandler: nil)
   }
 
+  // 专辑封面只随曲目变化：180px 足够 40pt 缩略图在 2x/3x 屏清晰，
+  // JPEG+base64 只有几十 KB，跟歌词同一次 evaluateJavaScript 推过去。
+  // 流媒体曲目偶尔没有 artwork，返回空串让页面把 img 藏掉，布局不塌。
+  private func artworkURL() -> String {
+    guard let art = player.nowPlayingItem?.artwork,
+          let img = art.image(at: CGSize(width: 180, height: 180)),
+          let data = img.jpegData(compressionQuality: 0.8) else { return demoArt }
+    return "data:image/jpeg;base64," + data.base64EncodedString()
+  }
+
   // 模拟器没有 Music 库：推一条假数据，验证注入链路和页面渲染不崩。
   // 真机不会走这里，读者别把它当成真实歌词。
   private func pushDemo() {
     title = "Demo Track"
     artist = "CarDash"
+    demoArt = "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxMjAiIGhlaWdodD0iMTIwIj48cmVjdCB3aWR0aD0iMTIwIiBoZWlnaHQ9IjEyMCIgcng9IjE4IiBmaWxsPSIjNWI3Y2ZhIi8+PHRleHQgeD0iNjAiIHk9IjgwIiBmb250LXNpemU9IjU2IiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmaWxsPSIjZmZmZmZmIj7imao8L3RleHQ+PC9zdmc+"
     album = ""
     duration = 120
     status = "ok"
@@ -375,7 +389,7 @@ final class LyricsBridge {
   private func verifyDemo(attempt: Int) {
     guard let v = web else { return }
     v.evaluateJavaScript(
-      "JSON.stringify({api:typeof CarDashLyrics,rows:document.querySelectorAll('#lyrList li').length,title:document.getElementById('lyrTitle')?document.getElementById('lyrTitle').textContent:null})"
+      "JSON.stringify({api:typeof CarDashLyrics,rows:document.querySelectorAll('#lyrList li').length,title:document.getElementById('lyrTitle')?document.getElementById('lyrTitle').textContent:null,art:document.getElementById('lyrArt')?document.getElementById('lyrArt').naturalWidth:0})"
     ) { [weak self] r, e in
       let s = (r as? String) ?? "nil"
       cardashTrace("lyrics demo push result=\(s) err=\(e?.localizedDescription ?? "nil") attempt=\(attempt)")
