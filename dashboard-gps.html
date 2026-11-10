@@ -130,16 +130,21 @@
   #load.bad{color:var(--red)}
   #load.hidden{display:none}
 
-  /* 滚动歌词：嵌在顶栏第一行、车速栏右侧的空位（车上那个红框位置），只显示 2 行：
+  /* 滚动歌词：嵌在顶栏第一行、车速栏右侧的空位（车上那个红框位置），默认 2 行：
      当前行顶格加粗、下一行淡显；字体尽量大，开车扫一眼能读。
+     拉右边改宽度、拉下边改行数（1–6 行）、右下角两个一起改；尺寸记进 localStorage，下次启动还在。
      数据来自原生壳（Apple Music 的 now-playing 状态 + 专辑封面），网页只负责按时间轴滚动。 */
   #lyrics{width:clamp(232px,19vw,248px);margin-top:clamp(6px,2.2vh,20px);align-self:flex-start;
+    position:relative;
     background:var(--card);-webkit-backdrop-filter:blur(16px);backdrop-filter:blur(16px);
     border:1px solid var(--line);border-radius:16px;
     padding:8px 10px;
     display:flex;flex-direction:column;gap:5px;
     box-shadow:0 14px 36px rgba(8,14,22,.16)}
   #lyrics.hidden{display:none}
+  #lyrics.sizing{border-color:var(--sub)}
+  /* 顶栏里 .ov 一律被改成 static，这里要挂住三个绝对定位的拉伸手柄，重新相对定位。 */
+  #topbar #lyrics{position:relative}
   #lyrHead{display:flex;align-items:center;gap:8px}
   #lyrArt{width:40px;height:40px;border-radius:10px;object-fit:cover;flex:0 0 auto;
     background:rgba(120,132,148,.16)}
@@ -151,10 +156,11 @@
     white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   #lyrClose{min-width:24px;min-height:24px;padding:0;border:0;background:transparent;
     color:var(--sub);font-size:15px;border-radius:8px}
-  #lyrView{position:relative;--lh:38px;height:calc(var(--lh) * 2);
+  #lyrView{position:relative;--lh:38px;--rows:2;height:calc(var(--lh) * var(--rows));
     overflow:hidden;
     -webkit-mask-image:linear-gradient(#000 82%,transparent);
     mask-image:linear-gradient(#000 82%,transparent)}
+  #lyrView[data-rows="1"]{-webkit-mask-image:none;mask-image:none}
   #lyrList{list-style:none;transition:transform .5s cubic-bezier(.22,.61,.36,1);will-change:transform}
   #lyrList li{height:var(--lh);line-height:var(--lh);font-size:clamp(22px,2.8vw,30px);
     color:var(--sub);font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
@@ -173,6 +179,15 @@
     -webkit-backdrop-filter:blur(14px);backdrop-filter:blur(14px);
     border-radius:14px;color:var(--sub);padding:10px 9px;font-size:16px;font-weight:700}
   #lyrOpen.hidden{display:none}
+  /* 拉伸手柄：贴在卡片右/下/右下角外侧的透明条，触控热区 ≥20px。
+     top/left 让开 ✕ 按钮，免得误拉当成关闭。右下角画个小 L 提示可以拉。 */
+  .lyrSz{position:absolute;z-index:3;touch-action:none}
+  #lyrSzE{top:60px;bottom:8px;right:-12px;width:24px;cursor:ew-resize}
+  #lyrSzS{left:8px;right:34px;bottom:-12px;height:24px;cursor:ns-resize}
+  #lyrSzSE{right:-12px;bottom:-12px;width:32px;height:32px;cursor:nwse-resize}
+  #lyrSzSE::before{content:'';position:absolute;right:7px;bottom:7px;width:10px;height:10px;
+    border-right:2px solid var(--sub);border-bottom:2px solid var(--sub);
+    border-radius:0 0 8px 0;opacity:.6}
   /* 窗口被压得太小时没有空位：窄窗顶栏会把 OBD 卡片折到第二行，
      矮窗则会撞上右下角的 Trip。宁可整张卡不显示，也不让它盖住读数。 */
   @media (max-width:420px){ #lyrics,#lyrOpen{display:none} }
@@ -221,6 +236,9 @@
     <ul id="lyrList"></ul>
     <div id="lyrMsg">Play something in Apple Music</div>
   </div>
+  <div class="lyrSz" id="lyrSzE" aria-hidden="true"></div>
+  <div class="lyrSz" id="lyrSzS" aria-hidden="true"></div>
+  <div class="lyrSz" id="lyrSzSE" aria-hidden="true"></div>
 </div>
 <div class="ov hidden" id="lyrOpen" role="button" aria-label="Show lyrics">♪</div>
 
@@ -1224,7 +1242,9 @@ const LYR = {
   key: '', status: 'idle', title: '', artist: '', art: '',
   lines: [], sig: '',
   base: 0, baseAt: 0, playing: false, rate: 1,
-  idx: -2
+  idx: -2,
+  w: 0,          // 0 = 用 CSS 默认宽度；拖动后是用户拉的像素
+  rows: 2        // 可见行数 1–6（拉下边改）
 };
 const lyrEl = document.getElementById('lyrics');
 const lyrList = document.getElementById('lyrList');
@@ -1329,7 +1349,7 @@ function lyrTick(){
   LYR.idx = idx;
   const items = lyrList.children;
   for(let i = 0; i < items.length; i++) items[i].classList.toggle('on', i === idx);
-  const lh = lyrView.clientHeight / 2;
+  const lh = lyrView.clientHeight / (LYR.rows || 2);
   const slot = Math.max(0, idx);      // 当前行顶格，下一行跟在下面
   lyrList.style.transform = 'translateY(' + (-slot * lh).toFixed(1) + 'px)';
 }
@@ -1345,6 +1365,61 @@ lyrOpen.addEventListener('click', () => {
   lyrStore('lyrics.open', '1');
   lyrChrome();
 });
+
+// —— 拉边框调尺寸：右边改宽度、下边改行数、右下角两个一起改。
+// 松手写进 localStorage，下次启动还原；窗口变窄（台前调度换档）时把宽度夹回上限。
+const LYR_MINW = 200, LYR_MAXW = 680, LYR_MINROWS = 1, LYR_MAXROWS = 6;
+function lyrMaxW(){ return Math.min(LYR_MAXW, Math.max(LYR_MINW, innerWidth - 24)); }
+function lyrApplySize(){
+  if(LYR.w > 0) lyrEl.style.width = Math.round(LYR.w) + 'px';
+  lyrView.style.setProperty('--rows', LYR.rows);
+  lyrView.dataset.rows = LYR.rows;
+  LYR.idx = -2;                       // 行高一变，滚动偏移要立刻重画
+}
+function lyrSaveSize(){
+  const w = LYR.w > 0 ? LYR.w : Math.round(lyrEl.getBoundingClientRect().width);
+  lyrStore('lyrics.size', Math.round(w) + 'x' + LYR.rows);
+}
+(function lyrLoadSize(){
+  const m = /^(\d+)x(\d+)$/.exec(lyrStore('lyrics.size') || '');
+  if(m){
+    LYR.w = Math.min(Math.max(+m[1], LYR_MINW), LYR_MAXW);
+    LYR.rows = Math.min(Math.max(+m[2], LYR_MINROWS), LYR_MAXROWS);
+  }
+  lyrApplySize();
+})();
+addEventListener('resize', () => {
+  if(LYR.w > lyrMaxW()){ LYR.w = lyrMaxW(); lyrApplySize(); }
+});
+function lyrBindSize(el, dir){
+  el.addEventListener('pointerdown', e => {
+    e.preventDefault(); e.stopPropagation();
+    const w0 = LYR.w > 0 ? LYR.w : Math.round(lyrEl.getBoundingClientRect().width);
+    const r0 = LYR.rows;
+    const lh = parseFloat(getComputedStyle(lyrView).getPropertyValue('--lh')) || 38;
+    const x0 = e.clientX, y0 = e.clientY;
+    try{ el.setPointerCapture(e.pointerId); }catch(err){}
+    lyrEl.classList.add('sizing');
+    const move = ev => {
+      if(dir === 'e' || dir === 'se') LYR.w = Math.round(Math.min(Math.max(w0 + ev.clientX - x0, LYR_MINW), lyrMaxW()));
+      if(dir === 's' || dir === 'se') LYR.rows = Math.min(Math.max(r0 + Math.round((ev.clientY - y0) / lh), LYR_MINROWS), LYR_MAXROWS);
+      lyrApplySize();
+    };
+    const up = () => {
+      el.removeEventListener('pointermove', move);
+      el.removeEventListener('pointerup', up);
+      el.removeEventListener('pointercancel', up);
+      lyrEl.classList.remove('sizing');
+      lyrSaveSize();
+    };
+    el.addEventListener('pointermove', move);
+    el.addEventListener('pointerup', up);
+    el.addEventListener('pointercancel', up);
+  });
+}
+lyrBindSize(document.getElementById('lyrSzE'), 'e');
+lyrBindSize(document.getElementById('lyrSzS'), 's');
+lyrBindSize(document.getElementById('lyrSzSE'), 'se');
 
 // 浏览器里没有原生壳：?lyricsdemo / #lyricsdemo 塞一份假时间轴，用来验证滚动和布局
 window.CarDashLyrics = { setTrack: lyrSetTrack, sync: lyrSync };
