@@ -130,9 +130,11 @@
   #load.bad{color:var(--red)}
   #load.hidden{display:none}
 
-  /* 滚动歌词：嵌在顶栏第一行、车速栏右侧的空位（车上那个红框位置），只显示 3 行。
+  /* 滚动歌词：嵌在顶栏第一行、车速栏右侧的空位（车上那个红框位置），只显示 2 行：
+     当前行顶格加粗、下一行淡显；字体尽量大，开车扫一眼能读。
+     ±0.5s 校准菜单默认藏着，双击卡片才出现，6s 不碰自动收回。
      数据来自原生壳（Apple Music 的 now-playing 状态 + 专辑封面），网页只负责按时间轴滚动。 */
-  #lyrics{width:clamp(208px,18vw,232px);margin-top:clamp(6px,2.2vh,20px);align-self:flex-start;
+  #lyrics{width:clamp(232px,19vw,248px);margin-top:clamp(6px,2.2vh,20px);align-self:flex-start;
     background:var(--card);-webkit-backdrop-filter:blur(16px);backdrop-filter:blur(16px);
     border:1px solid var(--line);border-radius:16px;
     padding:8px 10px;
@@ -144,25 +146,26 @@
     background:rgba(120,132,148,.16)}
   #lyrArt.hidden{display:none}
   #lyrMeta{min-width:0;flex:1 1 auto}
-  #lyrTitle{font-size:clamp(13px,1.4vw,15px);font-weight:700;white-space:nowrap;
+  #lyrTitle{font-size:clamp(14px,1.5vw,17px);font-weight:700;white-space:nowrap;
     overflow:hidden;text-overflow:ellipsis}
-  #lyrArtist{font-size:11.5px;color:var(--sub);font-weight:600;
+  #lyrArtist{font-size:12px;color:var(--sub);font-weight:600;
     white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   #lyrClose{min-width:24px;min-height:24px;padding:0;border:0;background:transparent;
     color:var(--sub);font-size:15px;border-radius:8px}
-  #lyrView{position:relative;--lh:24px;height:calc(var(--lh) * 3);
+  #lyrView{position:relative;--lh:38px;height:calc(var(--lh) * 2);
     overflow:hidden;
-    -webkit-mask-image:linear-gradient(transparent,#000 20%,#000 80%,transparent);
-    mask-image:linear-gradient(transparent,#000 20%,#000 80%,transparent)}
+    -webkit-mask-image:linear-gradient(#000 82%,transparent);
+    mask-image:linear-gradient(#000 82%,transparent)}
   #lyrList{list-style:none;transition:transform .5s cubic-bezier(.22,.61,.36,1);will-change:transform}
-  #lyrList li{height:var(--lh);line-height:var(--lh);font-size:clamp(13px,1.45vw,15px);
+  #lyrList li{height:var(--lh);line-height:var(--lh);font-size:clamp(22px,2.8vw,30px);
     color:var(--sub);font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
-    opacity:.5;transition:opacity .3s,color .3s}
-  #lyrList li.on{color:var(--ink);opacity:1;font-weight:700}
+    opacity:.55;transition:opacity .3s,color .3s}
+  #lyrList li.on{color:var(--ink);opacity:1;font-weight:800}
   #lyrMsg{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
-    text-align:center;font-size:12px;line-height:1.3;color:var(--sub);font-weight:600;padding:0 6px}
+    text-align:center;font-size:13px;line-height:1.3;color:var(--sub);font-weight:600;padding:0 6px}
   #lyrMsg.hidden{display:none}
-  #lyrFoot{display:flex;align-items:center;justify-content:flex-end;gap:6px}
+  #lyrFoot{display:none;align-items:center;justify-content:flex-end;gap:6px}
+  #lyrFoot.show{display:flex}
   .lyrBtn{-webkit-appearance:none;appearance:none;border:1px solid var(--line);
     background:rgba(120,132,148,.14);color:var(--ink);border-radius:9px;
     min-width:30px;min-height:24px;padding:0 7px;cursor:pointer;
@@ -1339,9 +1342,9 @@ function lyrTick(){
   LYR.idx = idx;
   const items = lyrList.children;
   for(let i = 0; i < items.length; i++) items[i].classList.toggle('on', i === idx);
-  const lh = lyrView.clientHeight / 3;
-  const slot = Math.max(0, idx);      // 还没开唱时让第一行先停在中间
-  lyrList.style.transform = 'translateY(' + ((1 - slot) * lh).toFixed(1) + 'px)';
+  const lh = lyrView.clientHeight / 2;
+  const slot = Math.max(0, idx);      // 当前行顶格，下一行跟在下面
+  lyrList.style.transform = 'translateY(' + (-slot * lh).toFixed(1) + 'px)';
 }
 setInterval(lyrTick, 250);
 
@@ -1352,8 +1355,8 @@ function lyrOffset(d){
   lyrChrome();
   lyrTick();
 }
-document.getElementById('lyrMinus').addEventListener('click', () => lyrOffset(-0.5));
-document.getElementById('lyrPlus').addEventListener('click', () => lyrOffset(0.5));
+document.getElementById('lyrMinus').addEventListener('click', () => { lyrOffset(-0.5); lyrFootShow(); });
+document.getElementById('lyrPlus').addEventListener('click', () => { lyrOffset(0.5); lyrFootShow(); });
 document.getElementById('lyrClose').addEventListener('click', () => {
   LYR.on = false;
   lyrStore('lyrics.open', '0');
@@ -1363,6 +1366,24 @@ lyrOpen.addEventListener('click', () => {
   LYR.on = true;
   lyrStore('lyrics.open', '1');
   lyrChrome();
+});
+
+// 校准菜单不常驻：双击卡片才出来，6s 不碰自动收回，开车时不占地方。
+const lyrFoot = document.getElementById('lyrFoot');
+let lyrFootTimer = 0, lyrLastTap = 0;
+function lyrFootShow(){
+  lyrFoot.classList.add('show');
+  clearTimeout(lyrFootTimer);
+  lyrFootTimer = setTimeout(() => lyrFoot.classList.remove('show'), 6000);
+}
+lyrEl.addEventListener('click', e => {
+  if(e.target.closest('.lyrBtn')) return;
+  const n = performance.now();
+  if(n - lyrLastTap < 350){
+    lyrLastTap = 0;
+    if(lyrFoot.classList.contains('show')){ clearTimeout(lyrFootTimer); lyrFoot.classList.remove('show'); }
+    else lyrFootShow();
+  }else lyrLastTap = n;
 });
 
 // 浏览器里没有原生壳：?lyricsdemo / #lyricsdemo 塞一份假时间轴，用来验证滚动和布局

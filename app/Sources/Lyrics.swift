@@ -45,7 +45,9 @@ final class LyricsBridge {
   private var duration: Double = 0
   private var lastFullSignature = ""
   private var lyricsTask: URLSessionDataTask?
-  private var demoArt = ""
+  private var artURL = ""
+  private var artTask: URLSessionDataTask?
+  private var artMem: [String: String] = [:]
 
   private let player = MPMusicPlayerController.systemMusicPlayer
 
@@ -134,6 +136,16 @@ final class LyricsBridge {
       duration = d
       lines = []
       status = "loading"
+      artTask?.cancel()
+      artURL = localArtwork()
+      if !artURL.isEmpty {
+        cardashTrace("lyrics art=local title=\(t)")
+      } else if let c = artMem[key] ?? readArtCache(key) {
+        artURL = c
+        cardashTrace("lyrics art=cache title=\(t)")
+      } else {
+        fetchArt(key: key)
+      }
       pushFull(force: true)
       loadLyrics()
     }
@@ -152,6 +164,8 @@ final class LyricsBridge {
     lines = []
     status = "idle"
     lyricsTask?.cancel()
+    artTask?.cancel()
+    artURL = ""
     pushFull(force: true)
   }
 
@@ -334,7 +348,7 @@ final class LyricsBridge {
       "playing": state == .playing,
       "position": max(0, player.currentPlaybackTime),
       "rate": state == .playing ? 1.0 : 0.0,
-      "art": artworkURL(),
+      "art": artURL,
       "lines": lineArr
     ]
     guard JSONSerialization.isValidJSONObject(obj),
@@ -357,12 +371,74 @@ final class LyricsBridge {
 
   // 专辑封面只随曲目变化：180px 足够 40pt 缩略图在 2x/3x 屏清晰，
   // JPEG+base64 只有几十 KB，跟歌词同一次 evaluateJavaScript 推过去。
-  // 流媒体曲目偶尔没有 artwork，返回空串让页面把 img 藏掉，布局不塌。
-  private func artworkURL() -> String {
+  // 流媒体曲目 artwork 经常是 nil（真机实测）：返回空串，由 fetchArt 走 iTunes 兜底。
+  private func localArtwork() -> String {
     guard let art = player.nowPlayingItem?.artwork,
           let img = art.image(at: CGSize(width: 180, height: 180)),
-          let data = img.jpegData(compressionQuality: 0.8) else { return demoArt }
+          let data = img.jpegData(compressionQuality: 0.8) else { return "" }
     return "data:image/jpeg;base64," + data.base64EncodedString()
+  }
+
+  private func readArtCache(_ key: String) -> String? {
+    try? String(contentsOf: cacheDir.appendingPathComponent(hash(key) + ".art"), encoding: .utf8)
+  }
+
+  // 兜底封面：iTunes Search 按标题+艺人搜，取最匹配结果的 artworkUrl100 升到 300px。
+  // 异步回来时曲目可能已换，key 对不上就丢弃；命中写磁盘缓存，下次同曲不再联网。
+  private func fetchArt(key: String) {
+    artTask?.cancel()
+    let q = (title + " " + artist).trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !q.isEmpty else { return }
+    var comps = URLComponents(string: "https://itunes.apple.com/search")!
+    comps.queryItems = [
+      URLQueryItem(name: "term", value: q),
+      URLQueryItem(name: "entity", value: "song"),
+      URLQueryItem(name: "limit", value: "5")
+    ]
+    guard let url = comps.url else { return }
+    let req = URLRequest(url: url, timeoutInterval: 10)
+    let wantTitle = title
+    let wantArtist = artist
+    artTask = URLSession.shared.dataTask(with: req) { [weak self] data, _, err in
+      guard let self = self, err == nil, let data = data else { return }
+      struct Row: Decodable {
+        let trackName: String?
+        let artistName: String?
+        let artworkUrl100: String?
+      }
+      struct Resp: Decodable { let results: [Row] }
+      let rows = (try? JSONDecoder().decode(Resp.self, from: data))?.results ?? []
+      var best: Row?
+      var bestScore = -1
+      for r in rows {
+        guard let a = r.artworkUrl100, !a.isEmpty else { continue }
+        var s = 0
+        if let n = r.trackName, n.caseInsensitiveCompare(wantTitle) == .orderedSame { s += 2 }
+        if let n = r.artistName, n.caseInsensitiveCompare(wantArtist) == .orderedSame { s += 1 }
+        if s > bestScore { bestScore = s; best = r }
+      }
+      guard let artStr = best?.artworkUrl100,
+            let artURL = URL(string: artStr.replacingOccurrences(of: "100x100bb", with: "300x300bb")) else {
+        DispatchQueue.main.async {
+          if key == self.currentKey { cardashTrace("lyrics art=none title=\(self.title)") }
+        }
+        return
+      }
+      URLSession.shared.dataTask(with: artURL) { [weak self] d, _, e in
+        guard let self = self, e == nil, let d = d, !d.isEmpty else { return }
+        let dataURL = "data:image/jpeg;base64," + d.base64EncodedString()
+        DispatchQueue.main.async {
+          guard key == self.currentKey else { return }
+          self.artURL = dataURL
+          self.artMem[key] = dataURL
+          try? dataURL.write(to: self.cacheDir.appendingPathComponent(self.hash(key) + ".art"),
+                             atomically: true, encoding: .utf8)
+          cardashTrace("lyrics art=itunes title=\(self.title)")
+          self.pushFull(force: true)
+        }
+      }.resume()
+    }
+    artTask?.resume()
   }
 
   // 模拟器没有 Music 库：推一条假数据，验证注入链路和页面渲染不崩。
@@ -370,7 +446,7 @@ final class LyricsBridge {
   private func pushDemo() {
     title = "Demo Track"
     artist = "CarDash"
-    demoArt = "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxMjAiIGhlaWdodD0iMTIwIj48cmVjdCB3aWR0aD0iMTIwIiBoZWlnaHQ9IjEyMCIgcng9IjE4IiBmaWxsPSIjNWI3Y2ZhIi8+PHRleHQgeD0iNjAiIHk9IjgwIiBmb250LXNpemU9IjU2IiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmaWxsPSIjZmZmZmZmIj7imao8L3RleHQ+PC9zdmc+"
+    artURL = "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxMjAiIGhlaWdodD0iMTIwIj48cmVjdCB3aWR0aD0iMTIwIiBoZWlnaHQ9IjEyMCIgcng9IjE4IiBmaWxsPSIjNWI3Y2ZhIi8+PHRleHQgeD0iNjAiIHk9IjgwIiBmb250LXNpemU9IjU2IiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmaWxsPSIjZmZmZmZmIj7imao8L3RleHQ+PC9zdmc+"
     album = ""
     duration = 120
     status = "ok"
