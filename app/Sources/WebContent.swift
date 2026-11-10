@@ -19,11 +19,20 @@ enum WebContent {
   }
 
   // 逐文件回落，而不是整目录二选一：同步下来的新 HTML 要能配 bundle 里的旧资产。
+  // 两份都在时比修改时间：装新 ipa 后数据容器里的旧同步副本不能盖住 bundle 里的新页面；
+  // 而只推页面时同步副本的 mtime 晚于 bundle 构建时间，仍然同步副本优先。
   static func resolve(_ path: String) -> URL? {
     let s = syncedDir.appendingPathComponent(path)
-    if FileManager.default.fileExists(atPath: s.path) { return s }
     let b = bundleDir.appendingPathComponent(path)
-    return FileManager.default.fileExists(atPath: b.path) ? b : nil
+    let fm = FileManager.default
+    let hasS = fm.fileExists(atPath: s.path)
+    let hasB = fm.fileExists(atPath: b.path)
+    if hasS && hasB {
+      let ms = ((try? fm.attributesOfItem(atPath: s.path))?[.modificationDate] as? Date) ?? .distantPast
+      let mb = ((try? fm.attributesOfItem(atPath: b.path))?[.modificationDate] as? Date) ?? .distantPast
+      return mb > ms ? b : s
+    }
+    return hasS ? s : (hasB ? b : nil)
   }
 
   static func sourceLabel(of url: URL) -> String {

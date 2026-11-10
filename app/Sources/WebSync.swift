@@ -14,7 +14,14 @@ enum WebSync {
   }
 
   static func run() {
-    Task.detached(priority: .utility) { await sync() }
+    // 单链自调度：启动跑一次，之后每 10 分钟再探一次。只写盘不 reload，
+    // 这样推送时 app 哪怕在后台挂着，下次启动 compose 到的也是新副本。
+    Task.detached(priority: .utility) {
+      while !Task.isCancelled {
+        await sync()
+        do { try await Task.sleep(nanoseconds: 600_000_000_000) } catch { return }
+      }
+    }
   }
 
   private static func sync() async {

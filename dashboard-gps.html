@@ -132,7 +132,6 @@
 
   /* 滚动歌词：嵌在顶栏第一行、车速栏右侧的空位（车上那个红框位置），只显示 2 行：
      当前行顶格加粗、下一行淡显；字体尽量大，开车扫一眼能读。
-     ±0.5s 校准菜单默认藏着，双击卡片才出现，6s 不碰自动收回。
      数据来自原生壳（Apple Music 的 now-playing 状态 + 专辑封面），网页只负责按时间轴滚动。 */
   #lyrics{width:clamp(232px,19vw,248px);margin-top:clamp(6px,2.2vh,20px);align-self:flex-start;
     background:var(--card);-webkit-backdrop-filter:blur(16px);backdrop-filter:blur(16px);
@@ -164,15 +163,11 @@
   #lyrMsg{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
     text-align:center;font-size:13px;line-height:1.3;color:var(--sub);font-weight:600;padding:0 6px}
   #lyrMsg.hidden{display:none}
-  #lyrFoot{display:none;align-items:center;justify-content:flex-end;gap:6px}
-  #lyrFoot.show{display:flex}
   .lyrBtn{-webkit-appearance:none;appearance:none;border:1px solid var(--line);
     background:rgba(120,132,148,.14);color:var(--ink);border-radius:9px;
     min-width:30px;min-height:24px;padding:0 7px;cursor:pointer;
     font-family:inherit;font-size:12px;font-weight:700;transition:transform .12s}
   .lyrBtn:active{transform:scale(.93)}
-  #lyrOff{font-size:11px;color:var(--sub);font-weight:700;
-    font-variant-numeric:tabular-nums;min-width:40px;text-align:center}
   #lyrOpen{align-self:flex-start;margin-top:clamp(6px,2.2vh,20px);z-index:4;
     cursor:pointer;border:1px solid var(--line);background:var(--card);
     -webkit-backdrop-filter:blur(14px);backdrop-filter:blur(14px);
@@ -225,11 +220,6 @@
   <div id="lyrView">
     <ul id="lyrList"></ul>
     <div id="lyrMsg">Play something in Apple Music</div>
-  </div>
-  <div id="lyrFoot">
-    <button class="lyrBtn" id="lyrMinus" aria-label="Lyrics earlier">−0.5s</button>
-    <span id="lyrOff">0.0s</span>
-    <button class="lyrBtn" id="lyrPlus" aria-label="Lyrics later">+0.5s</button>
   </div>
 </div>
 <div class="ov hidden" id="lyrOpen" role="button" aria-label="Show lyrics">♪</div>
@@ -1234,15 +1224,13 @@ const LYR = {
   key: '', status: 'idle', title: '', artist: '', art: '',
   lines: [], sig: '',
   base: 0, baseAt: 0, playing: false, rate: 1,
-  idx: -2,
-  off: Number(lyrStore('lyrics.offset')) || 0
+  idx: -2
 };
 const lyrEl = document.getElementById('lyrics');
 const lyrList = document.getElementById('lyrList');
 const lyrView = document.getElementById('lyrView');
 const lyrMsg = document.getElementById('lyrMsg');
 const lyrOpen = document.getElementById('lyrOpen');
-const lyrOffEl = document.getElementById('lyrOff');
 const lyrTitleEl = document.getElementById('lyrTitle');
 const lyrArtistEl = document.getElementById('lyrArtist');
 const lyrArtEl = document.getElementById('lyrArt');
@@ -1293,7 +1281,6 @@ function lyrChrome(){
   const show = LYR.on && (!!LYR.title || LYR.status === 'denied');
   lyrEl.classList.toggle('hidden', !show);
   lyrOpen.classList.toggle('hidden', !(LYR.title && !LYR.on));
-  lyrOffEl.textContent = (LYR.off > 0 ? '+' : '') + LYR.off.toFixed(1) + 's';
 }
 function lyrSetTrack(j){
   if(!j || typeof j !== 'object') return;
@@ -1331,7 +1318,7 @@ function lyrSync(j){
 }
 function lyrTick(){
   if(!LYR.lines.length) return;
-  const now = lyrPos() - LYR.off;     // off 为正 = 歌词推后
+  const now = lyrPos();
   let lo = 0, hi = LYR.lines.length - 1, idx = -1;
   while(lo <= hi){
     const mid = (lo + hi) >> 1;
@@ -1348,15 +1335,6 @@ function lyrTick(){
 }
 setInterval(lyrTick, 250);
 
-function lyrOffset(d){
-  LYR.off = Math.max(-10, Math.min(10, Math.round((LYR.off + d) * 10) / 10));
-  lyrStore('lyrics.offset', String(LYR.off));
-  LYR.idx = -2;
-  lyrChrome();
-  lyrTick();
-}
-document.getElementById('lyrMinus').addEventListener('click', () => { lyrOffset(-0.5); lyrFootShow(); });
-document.getElementById('lyrPlus').addEventListener('click', () => { lyrOffset(0.5); lyrFootShow(); });
 document.getElementById('lyrClose').addEventListener('click', () => {
   LYR.on = false;
   lyrStore('lyrics.open', '0');
@@ -1366,24 +1344,6 @@ lyrOpen.addEventListener('click', () => {
   LYR.on = true;
   lyrStore('lyrics.open', '1');
   lyrChrome();
-});
-
-// 校准菜单不常驻：双击卡片才出来，6s 不碰自动收回，开车时不占地方。
-const lyrFoot = document.getElementById('lyrFoot');
-let lyrFootTimer = 0, lyrLastTap = 0;
-function lyrFootShow(){
-  lyrFoot.classList.add('show');
-  clearTimeout(lyrFootTimer);
-  lyrFootTimer = setTimeout(() => lyrFoot.classList.remove('show'), 6000);
-}
-lyrEl.addEventListener('click', e => {
-  if(e.target.closest('.lyrBtn')) return;
-  const n = performance.now();
-  if(n - lyrLastTap < 350){
-    lyrLastTap = 0;
-    if(lyrFoot.classList.contains('show')){ clearTimeout(lyrFootTimer); lyrFoot.classList.remove('show'); }
-    else lyrFootShow();
-  }else lyrLastTap = n;
 });
 
 // 浏览器里没有原生壳：?lyricsdemo / #lyricsdemo 塞一份假时间轴，用来验证滚动和布局
