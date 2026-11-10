@@ -685,6 +685,11 @@ function initBuddy(){
   catch(e){ card.classList.add('gone'); return; }   // 上下文不够就把整张卡收起来
   r.setPixelRatio(Math.min(devicePixelRatio||1, 2));
   r.outputEncoding = THREE.sRGBEncoding;
+  // WKWebView 在内存压力下会主动回收 WebGL 上下文，而这台车机要连续跑几个小时。
+  // 小卡是页面里的第二个上下文：它被回收就整张卡收起来，别让屏幕留一块黑，下次启动再建。
+  cv.addEventListener('webglcontextlost', e => {
+    e.preventDefault(); BUDDY = null; card.classList.add('gone');
+  }, false);
   const sc = new THREE.Scene();
   sc.environment = scene.environment;               // 沿用主场景的 PMREM，材质才不会发灰
   sc.add(new THREE.HemisphereLight(0xffffff, 0xd8e2f2, 0.7));
