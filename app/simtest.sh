@@ -100,9 +100,9 @@ if [ ! -s "$TRACE" ]; then
   [ -n "$ALT" ] && TRACE="$ALT"
 fi
 echo "[sim] launch (trace file: $TRACE)"
-# 慢 runner 上 simctl launch 会卡在 "Waiting on System App"（v1.2.0 实测 94s+），
-# 60s 看门狗会误杀健康调用；给 180s，真正楔死仍然会失败。
-step "launch" tmo 180 xcrun simctl launch "$UDID" "$BID"
+# 慢 runner 上 simctl launch 会卡在 "Waiting on System App"（v1.2.0 实测 94s+，
+# v1.2.5 那次超过 180s 被误杀 rc=143）；给 300s，真正楔死仍然会失败。
+step "launch" tmo 300 xcrun simctl launch "$UDID" "$BID"
 
 # 模拟器里的 app 就是宿主机进程，pgrep 比任何日志管道都直接
 ALIVE=no; if pgrep -f "CarDash.app/CarDash" >/dev/null 2>&1; then ALIVE=yes; fi
