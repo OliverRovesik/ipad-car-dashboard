@@ -68,6 +68,15 @@
   #trip b{display:block;font-size:34px;font-weight:600;font-variant-numeric:tabular-nums}
   #trip small{font-size:13px;color:var(--sub);font-weight:600}
 
+  /* 左下：两位乘客特写，动作和车内的完全同步 */
+  #buddy{left:clamp(12px,1.6vw,26px);bottom:calc(clamp(12px,2.4vh,18px) + 74px + env(safe-area-inset-bottom,0px));
+    width:clamp(116px,25vw,152px);height:clamp(104px,13vh,130px);
+    background:var(--card);-webkit-backdrop-filter:blur(14px);backdrop-filter:blur(14px);
+    border:1px solid var(--line);border-radius:clamp(16px,2vw,22px);overflow:hidden;
+    pointer-events:none}                                        /* 别挡住跟车视角的拖拽 */
+  #buddy canvas{display:block;width:100%;height:100%}
+  #buddy.gone{display:none}
+
   /* 底部状态 */
   /* 顶部中央：日期 / 时间 / 天气 */
   #clockwx{display:flex;align-items:center;gap:clamp(8px,1vw,14px);
@@ -106,7 +115,8 @@
     font-family:inherit;font-weight:700;font-size:clamp(16px,1.6vw,20px);transition:transform .12s}
   #search button:active{transform:scale(.94)}
   /* 窄到 1/3 分屏那一侧时收藏+搜索会换成两行，提示条要让出来 */
-  @media (max-width:640px){ #hint{bottom:calc(clamp(12px,2.4vh,18px) + 118px + env(safe-area-inset-bottom,0px))} }
+  @media (max-width:640px){ #hint{bottom:calc(clamp(12px,2.4vh,18px) + 118px + env(safe-area-inset-bottom,0px))}
+    #buddy{bottom:calc(clamp(12px,2.4vh,18px) + 132px + env(safe-area-inset-bottom,0px))} }
   .chip{background:var(--card);backdrop-filter:blur(14px);border:1px solid var(--line);
     border-radius:20px;padding:6px 13px;font-size:12.5px;font-weight:600;color:var(--sub);
     display:flex;align-items:center;gap:7px}
@@ -240,6 +250,9 @@
 <div class="ov chip" id="hint">← Drag to orbit the car →</div>
 
 <div class="ov" id="trip"><span>Trip</span><b id="vTrip">0.0</b><small>km · tap to reset</small></div>
+
+<!-- 左下角乘客特写：第二个 WebGL renderer 画在同一张卡片里，姿态数值直接读车内那两份 -->
+<div class="ov" id="buddy"><canvas id="buddyCv"></canvas></div>
 
 <!-- destination 坐标取自他给的 maps.app.goo.gl 短链解析结果；dir_action=navigate 让谷歌地图接到就直接开始导航 -->
 <div class="ov" id="favbar">
@@ -511,8 +524,8 @@ function applyTailGlow(){
 // 车组绕 Y 转了 180°，所以局部 +X 是驾驶侧（菲律宾左舵）、局部 +Z 是车头。
 // 乘客朝车头、略向内偏，再往后靠着椅背坐（backward pitch）并轻微侧倾（roll），呈放松斜靠姿态。
 const RIDERS = [
-  {kind:'mallow', x: 0.36, y:0.72, z:0.30, yaw: -0.30, lean:-0.34, roll: 0.16, scale:2.2},
-  {kind:'bunny',  x:-0.36, y:0.50, z:0.30, yaw:  0.30, lean:-0.34, roll:-0.16, scale:1.7},
+  {kind:'mallow', x: 0.36, y:0.72, z:0.30, yaw: -0.30, lean:-0.34, roll: 0.16, scale:2.2, obj:null, pose:{pitch:0, roll:0, dy:0}},
+  {kind:'bunny',  x:-0.36, y:0.50, z:0.30, yaw:  0.30, lean:-0.34, roll:-0.16, scale:1.7, obj:null, pose:{pitch:0, roll:0, dy:0}},
 ];
 const RIDER_SCALE = 1.0;
 // 调试开关都走网址 hash，可以叠着用：#park-mark-ghost-xray
@@ -613,6 +626,7 @@ function addRiders(car){
     fig.rotation.z = r.roll || 0;
     if(GHOST_RIDERS) fig.traverse(o => { if(o.isMesh){ o.material.depthTest = false; o.renderOrder = 8; } });
     fig.traverse(o => { if(o.isMesh) o.userData.rider = r.kind; });
+    r.obj = fig;                                   // 每帧姿态要改这个 Group
     car.add(fig);
     if(MARK_RIDERS){
       const pad = new THREE.Mesh(new THREE.BoxGeometry(0.40, 0.010, 0.40),
@@ -623,6 +637,96 @@ function addRiders(car){
       mid.position.set(r.x, r.y + 0.24, r.z); mid.renderOrder = 9; car.add(mid);
     }
   }
+}
+
+/* ---------- 乘客姿态：一套数值，车内模型和左下角特写共用 ---------- */
+// 输入全是页面里已经有的量：aSmooth 纵向加速度(m/s²，负=刹车)、yawRate 航向角速度
+// (rad/s，正=右转)、shown.speed、停稳时长。两处渲染只读 r.pose，所以动作必然一致。
+let yawRate = 0, stillSec = 0;
+const RSM = RIDERS.map(() => ({p:0, r:0, y:0}));   // 平滑后的姿态，路面抖动另加
+
+function updateRiderPose(dt, t){
+  stillSec = shown.speed > 0.5 ? 0 : stillSec + dt;
+  // 停稳 25s 后打瞌睡，8s 内睡熟：头往前垂、呼吸变深变慢
+  const sleepy = clamp01((stillSec - 25) / 8);
+  const live   = D.connected ? 1 : 0;
+  const brake  = Math.max(0, -aSmooth) * live;
+  const accel  = Math.max(0,  aSmooth) * live;
+  const turn   = Math.max(-0.7, Math.min(0.7, yawRate)) * live;
+  RIDERS.forEach((r, i) => {
+    const ph = i * 1.9, g = i ? 0.86 : 1;          // 两人错开相位、幅度略差，别像复制粘贴
+    const breath = Math.sin(t * (sleepy > 0.5 ? 0.72 : 1.5) + ph);
+    const road   = Math.sin(t * 12.4 + ph * 2) * Math.min(1, shown.speed / 70);
+    const pT = brake * 0.075 * g - accel * 0.04 * g + sleepy * 0.22 + breath * 0.03 * (1 + sleepy * 0.8);
+    const rT = -turn * 0.30 * g + breath * 0.008;
+    const yT = breath * 0.012 * (1 + sleepy * 1.6);
+    const k  = Math.min(1, dt * (sleepy > 0.5 ? 1.8 : 5));
+    const s  = RSM[i];
+    s.p += (pT - s.p) * k;  s.r += (rT - s.r) * k;  s.y += (yT - s.y) * k;
+    r.pose.pitch = s.p + road * 0.009;             // 路面细抖不过平滑，直接叠上去
+    r.pose.roll  = s.r + road * 0.007;
+    r.pose.dy    = s.y + road * 0.003;
+    if(r.obj){
+      r.obj.rotation.x = r.lean + r.pose.pitch;
+      r.obj.rotation.z = r.roll + r.pose.roll;
+      r.obj.position.y = r.y + r.pose.dy;
+    }
+  });
+}
+
+/* ---------- 左下角特写：独立的小 WebGL 上下文，读同一份 r.pose ---------- */
+// 小卡是从正面看，车内是从车后看，左右相反：所以 yaw 和 roll 取反，屏幕上两边倒向
+// 才一致；pitch 不取反，前后点头本来就同向。
+let BUDDY = null;
+function initBuddy(){
+  const cv = document.getElementById('buddyCv'), card = document.getElementById('buddy');
+  let r;
+  try{ r = new THREE.WebGLRenderer({ canvas:cv, antialias:true, alpha:true }); }
+  catch(e){ card.classList.add('gone'); return; }   // 上下文不够就把整张卡收起来
+  r.setPixelRatio(Math.min(devicePixelRatio||1, 2));
+  r.outputEncoding = THREE.sRGBEncoding;
+  const sc = new THREE.Scene();
+  sc.environment = scene.environment;               // 沿用主场景的 PMREM，材质才不会发灰
+  sc.add(new THREE.HemisphereLight(0xffffff, 0xd8e2f2, 0.7));
+  const key = new THREE.DirectionalLight(0xffffff, 0.85); key.position.set(1.2, 2.4, 2.2); sc.add(key);
+  const cam = new THREE.PerspectiveCamera(32, 1, 0.01, 10);
+  // 两人本来就后靠 0.34rad(≈19°)，水平看过去脸是背向镜头的，所以相机抬高同样的俯角正对脸
+  cam.position.set(0, 0.46, 1.06); cam.lookAt(0, 0.12, 0);
+  // 原始模型只有 0.19~0.44 高，特写里按各自比例放大到差不多一样高
+  const scale = { mallow:1.4, bunny:0.98 };
+  const figs = RIDERS.map((row, i) => {
+    const g = row.kind === 'bunny' ? makeBunny() : makeMallow();
+    g.scale.setScalar(scale[row.kind]);
+    g.position.set(i ? 0.16 : -0.16, 0, 0);
+    g.rotation.order = 'YXZ';
+    g.rotation.y = -row.yaw;
+    g.rotation.x = row.lean;
+    g.rotation.z = -row.roll;
+    sc.add(g);
+    const pad = new THREE.Mesh(new THREE.CircleGeometry(0.12, 24),
+      new THREE.MeshBasicMaterial({color:0x2a2f3a, transparent:true, opacity:0.12, depthWrite:false}));
+    pad.rotation.x = -Math.PI/2; pad.position.set(i ? 0.16 : -0.16, 0.002, 0.02); sc.add(pad);
+    return { g, pad, row };
+  });
+  BUDDY = { r, sc, cam, figs, w:0, h:0 };
+}
+function drawBuddy(){
+  if(!BUDDY) return;
+  const cv = BUDDY.r.domElement, w = cv.clientWidth, h = cv.clientHeight;
+  if(!w || !h) return;
+  if(w !== BUDDY.w || h !== BUDDY.h){
+    BUDDY.w = w; BUDDY.h = h;
+    BUDDY.r.setSize(w, h);
+    BUDDY.cam.aspect = w/h; BUDDY.cam.updateProjectionMatrix();
+  }
+  for(const f of BUDDY.figs){
+    const p = f.row.pose;
+    f.g.rotation.x = f.row.lean + p.pitch;
+    f.g.rotation.z = -(f.row.roll + p.roll);
+    f.g.position.y = p.dy;
+    f.pad.scale.setScalar(Math.max(0.6, 1 - p.dy * 6));   // 人抬一点，影子缩一点
+  }
+  BUDDY.r.render(BUDDY.sc, BUDDY.cam);
 }
 
 // 把车漆/内饰壳在腰线以上切成一个半透明"玻璃罩"：下车身保持实心写深度，
@@ -855,6 +959,7 @@ new THREE.GLTFLoader().load(modelURL(), g => {
     }
   }
   addRiders(car);
+  initBuddy();
   car.rotation.y = CAR_YAW;
   car.position.set(0, 0, -(Z_EGO + size.z/2));            // 车尾对齐 Z_EGO
   scene.add(car);
@@ -1022,8 +1127,9 @@ function loop(ts){
     const dz = shown.speed/3.6*dt;
     for(const m of dashes){ m.position.z += dz; if(m.position.z > 8) m.position.z -= 44*7.5; }
   }
+  updateRiderPose(dt, ts/1000);
   paint();
-  if(!PROBE_RIDERS) renderFrame();   // 探针只要数学结果，不烘像素，快一个数量级
+  if(!PROBE_RIDERS){ renderFrame(); drawBuddy(); }   // 探针只要数学结果，不烘像素，快一个数量级
   requestAnimationFrame(loop);
 }
 
@@ -1063,7 +1169,7 @@ function hav(lat1, lon1, lat2, lon2){                 // 大圆距离(米)
   return 2*R_E*Math.asin(Math.min(1, Math.sqrt(a)));
 }
 function ingest(lat, lon, speedMs, acc, head, ts){
-  G.acc = acc; G.head = head;
+  G.acc = acc;
   let v = null;
   if(speedMs !== null && speedMs !== undefined) v = Math.abs(speedMs)*3.6;
 
@@ -1077,6 +1183,16 @@ function ingest(lat, lon, speedMs, acc, head, ts){
   if(v === null){ v = D.speed; G.src = 'no speed'; }
   else G.src = speedMs==null ? 'from position' : 'GPS speed';
   D.speed = Math.max(0, Math.min(220, v));
+  // 航向角速度（转弯方向，正=右转）：1Hz 的航向在低速时纯属噪声，所以只在 8km/h 以上采信，
+  // 角度差折到 ±180°，跨 0/360 不会算出一整圈。
+  if(head !== null && head !== undefined){
+    const hd = (ts - G.posTs)/1000;
+    if(G.head !== null && hd > 0.2 && hd < 3 && D.speed > 8){
+      const dh = ((head - G.head) % 360 + 540) % 360 - 180;
+      yawRate += (dh*Math.PI/180/hd - yawRate) * 0.45;
+    } else yawRate *= 0.8;
+    G.head = head;
+  }
   G.lat = lat; G.lon = lon; G.posTs = ts;
   if(!D.connected){ D.connected = true; refreshWeather(); }   // 第一个定位点一到就刷新天气
 }
