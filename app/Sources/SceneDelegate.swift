@@ -19,7 +19,14 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate, WKNavigationDeleg
              options: UIScene.ConnectionOptions) {
     guard let ws = scene as? UIWindowScene else { cardashTrace("no UIWindowScene"); return }
     let w = UIWindow(windowScene: ws)
-    w.backgroundColor = UIColor(white: 0.06, alpha: 1)
+    // 底色跟页面 CSS 的 --bg 对齐（浅色 #eef1f5 / 深色 #0e1216）。以前写死近黑 0.06，
+    // 于是任何几何错位都会表现成黑边；同色之后错位顶多看不见。
+    let pageBG = UIColor { tc in
+      tc.userInterfaceStyle == .dark
+        ? UIColor(red: 0x0e/255.0, green: 0x12/255.0, blue: 0x16/255.0, alpha: 1)
+        : UIColor(red: 0xee/255.0, green: 0xf1/255.0, blue: 0xf5/255.0, alpha: 1)
+    }
+    w.backgroundColor = pageBG
     w.rootViewController = root
     root.view.backgroundColor = w.backgroundColor
 
