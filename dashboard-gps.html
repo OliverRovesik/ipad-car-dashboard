@@ -173,6 +173,15 @@
     color:var(--sub);font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
     opacity:.55;transition:opacity .3s,color .3s}
   #lyrList li.on{color:var(--ink);opacity:1;font-weight:800}
+  /* 一行放不下：右端先亮省略号，半秒后整句向左滚出来。li 是裁剪窗口，span 是整句原文，
+     省略号挂在 li 上、滚动开始前淡掉，免得压在正在滚的字上。 */
+  #lyrList li{position:relative}
+  #lyrList li > span{display:inline-block;white-space:nowrap;will-change:transform}
+  #lyrList li.more::after{content:'…';position:absolute;right:0;top:0;
+    height:var(--lh);line-height:var(--lh);transition:opacity .25s}
+  #lyrList li.roll::after{opacity:0}
+  #lyrList li.roll > span{animation:lyrRoll var(--rd,5s) cubic-bezier(.22,.61,.3,1) .5s forwards}
+  @keyframes lyrRoll{ to{ transform:translateX(var(--roll,0)) } }
   #lyrMsg{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
     text-align:center;font-size:13px;line-height:1.3;color:var(--sub);font-weight:600;padding:0 6px}
   #lyrMsg.hidden{display:none}
@@ -263,8 +272,6 @@
   <a class="fav" target="_blank" rel="noopener" href="https://www.google.com/maps/dir/?api=1&amp;travelmode=driving&amp;dir_action=navigate&amp;destination=14.6342128,121.0166671">🏠 Home</a>
   <a class="fav" target="_blank" rel="noopener" href="https://www.google.com/maps/dir/?api=1&amp;travelmode=driving&amp;dir_action=navigate&amp;destination=14.6685938,121.0116962">💼 Work</a>
   <a class="fav" target="_blank" rel="noopener" href="https://www.google.com/maps/dir/?api=1&amp;travelmode=driving&amp;dir_action=navigate&amp;destination=14.5564398,120.9956354">❤️</a>
-  <!-- 谷歌地图没有对外"结束导航"的接口；这个按钮把谷歌地图交回前台（导航中会直接回到导航页），✕ 在它那页里按 -->
-  <a class="fav" target="_blank" rel="noopener" href="comgooglemaps://">❌</a>
   <!-- GET 表单让浏览器自己拼 query=，零 JS、不受弹窗拦截，页面本身不被导航走。
        api=1 必须是隐藏字段：规范里表单 GET 会用自己序列化出的 query 整体替换 action 上的 query。 -->
   <form id="search" method="GET" target="_blank" rel="noopener"
@@ -722,7 +729,8 @@ function catClip(name, once){
 // 停车打瞌睡演 sleep，平时演 idle，中间每隔 18~40s 从剩下 10 段里随机挑一段演完就回来。
 function catTick(t){
   if(!CAT || !CAT.root) return;
-  if(stillSec > 25){ catClip('sleep'); CAT.until = 0; return; }
+  CAT.t = t;
+  if(stillSec > 25 && t > CAT.wakeUntil){ catClip('sleep'); CAT.until = 0; return; }
   if(CAT.cur === 'sleep') catClip('idle');
   if(CAT.until && t > CAT.until){ catClip('idle'); CAT.until = 0; }
   if(!CAT.until && t > CAT.nextAt){
@@ -730,6 +738,21 @@ function catTick(t){
     const name = CAT.pool[(Math.random()*CAT.pool.length)|0];
     if(name){ catClip(name, true); CAT.until = t + CAT.clips[name].duration + 0.3; }
   }
+}
+/* 点一下猫的反馈：从五段"有反应"的动画里挑一段和当前不同的，播完自己回 idle。
+   walk/run 不放进来的原因是它们会带着模型位移，猫是钉在屏幕上的一小块画布，会跑出框；
+   death/attack 当点击反馈太吓人。CAT.t 是渲染循环写的，点击在循环外，只能取最近一帧。 */
+const CAT_TAP = ['call','hit','jump','sit','eat'];
+function catTap(){
+  if(!CAT || !CAT.mix || !CAT.root) return;
+  const avail = CAT_TAP.filter(n => CAT.clips[n] && n !== CAT.cur);
+  if(!avail.length) return;
+  const name = avail[(Math.random()*avail.length)|0];
+  catClip(name, true);
+  const end = CAT.t + CAT.clips[name].duration + 0.3;
+  CAT.until = end;
+  CAT.nextAt = end + 14 + Math.random()*18;   // 别和随机动画撞在同一段
+  CAT.wakeUntil = end + 2.5;                  // 停车打瞌睡时也理一下人
 }
 function initCat(){
   const cv = document.getElementById('catCv'), box = document.getElementById('cat');
@@ -749,7 +772,7 @@ function initCat(){
   const cam = new THREE.PerspectiveCamera(30, 1, 0.01, 20);
   cam.position.set(0, 0.36, 1.24); cam.lookAt(0, 0.26, 0);
   CAT = { r, sc, cam, cv, box, root:null, mix:null, clips:{}, cur:'', w:0, h:0,
-          until:0, nextAt:12, pool:[] };
+          until:0, nextAt:12, pool:[], t:0, wakeUntil:0 };
   const p = /^(\d+),(\d+)$/.exec(lyrStore('cat.pos') || '');
   if(p){ CAT_POS.x = +p[1]; CAT_POS.y = +p[2]; }
   catClamp();
@@ -768,12 +791,13 @@ function initCat(){
       CAT_POS.x = px0 + dx; CAT_POS.y = py0 + dy;
       catClamp();
     };
-    const up = () => {
+    const up = ev => {
       box.removeEventListener('pointermove', move);
       box.removeEventListener('pointerup', up);
       box.removeEventListener('pointercancel', up);
       box.classList.remove('dragging');
       if(moved) lyrStore('cat.pos', Math.round(CAT_POS.x) + ',' + Math.round(CAT_POS.y));
+      else if(ev.type === 'pointerup') catTap();           // 没挪动就是点了一下
     };
     box.addEventListener('pointermove', move);
     box.addEventListener('pointerup', up);
@@ -1490,6 +1514,34 @@ function lyrBuild(){
   lyrList.appendChild(frag);
   lyrList.style.transform = 'translateY(0)';
   LYR.idx = -2;
+  requestAnimationFrame(lyrMeasure);      // 要等排版落地才量得出宽度
+}
+function lyrOver(li){
+  const sp = li && li.firstElementChild;
+  return sp ? sp.scrollWidth - li.clientWidth : 0;
+}
+// 全部行都标一遍 .more：下一行在它变成当前行之前就该带上省略号
+function lyrMeasure(){
+  const items = lyrList.children;
+  for(let i = 0; i < items.length; i++) items[i].classList.toggle('more', lyrOver(items[i]) > 2);
+}
+/* 当前行的横向滚动：距离写成 --roll，时长按 60px/s 的可读速度算，最短 1.5s、最长 8s。
+   不按下一句的空档封顶——那样长句会被推得飞快，等于读不到；滚不完也没关系，
+   右端的省略号已经说明后面还有字，而且换行时整列本来就要往上滚走。 */
+function lyrRoll(i){
+  const items = lyrList.children;
+  for(let k = 0; k < items.length; k++) if(k !== i) items[k].classList.remove('roll');
+  const li = items[i];
+  if(!li) return;
+  const over = lyrOver(li);
+  li.classList.toggle('more', over > 2);
+  li.classList.remove('roll');
+  const sp = li.firstElementChild;
+  if(over <= 2){ sp.style.transform = ''; return; }
+  sp.style.setProperty('--roll', '-' + Math.round(over + 8) + 'px');
+  sp.style.setProperty('--rd', Math.min(Math.max(over/60, 1.5), 8).toFixed(2) + 's');
+  void sp.offsetWidth;                    // 同名动画不强制回流就不会重头播
+  li.classList.add('roll');
 }
 function lyrChrome(){
   lyrTitleEl.textContent = LYR.title || '—';
@@ -1565,6 +1617,7 @@ function lyrTick(){
   const lh = lyrView.clientHeight / (LYR.rows || 2);
   const slot = Math.max(0, idx);      // 当前行顶格，下一行跟在下面
   lyrList.style.transform = 'translateY(' + (-slot * lh).toFixed(1) + 'px)';
+  lyrRoll(idx);
 }
 setInterval(lyrTick, 250);
 
@@ -1588,6 +1641,7 @@ function lyrApplySize(){
   lyrView.style.setProperty('--rows', LYR.rows);
   lyrView.dataset.rows = LYR.rows;
   LYR.idx = -2;                       // 行高一变，滚动偏移要立刻重画
+  requestAnimationFrame(lyrMeasure);  // 宽度变了，哪些行放不下要重新标
   lyrClampPlace();                    // 变宽/变高后重新夹回屏幕内
 }
 function lyrSaveSize(){
