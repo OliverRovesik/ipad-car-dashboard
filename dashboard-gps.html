@@ -140,13 +140,22 @@
      当前行顶格加粗、下一行淡显；字体尽量大，开车扫一眼能读。
      拉右边改宽度、拉下边改行数（1–6 行）、右下角两个一起改；位置和尺寸都记进 localStorage。
      数据来自原生壳（Apple Music 的 now-playing 状态 + 专辑封面），网页只负责按时间轴滚动。 */
+  /* 背景照 flow 页 G 表那块：去描边、去投影，只留中间浓、边缘淡开的径向渐层，几何一致。
+     但渐层强度不能照抄 G 表的 .34/.10/0——这块能拖到车漆 #020c41 和车道虚线上，
+     实测淡行（--sub）压在车漆上只剩 1.09、压夜间虚线只剩 2.71，等于读不到，所以留了底。
+     白天压白配近黑字、夜间压黑配近白字；blur 留着压住背后会动的路面。 */
   #lyrics{width:clamp(232px,19vw,248px);
     position:relative;
-    background:var(--card);-webkit-backdrop-filter:blur(16px);backdrop-filter:blur(16px);
-    border:1px solid var(--line);border-radius:16px;
+    background:radial-gradient(115% 90% at 50% 42%, rgba(255,255,255,.95), rgba(255,255,255,.90) 66%, rgba(255,255,255,.86));
+    text-shadow:0 2px 8px rgba(255,255,255,.55);
+    -webkit-backdrop-filter:blur(16px);backdrop-filter:blur(16px);
+    border:1px solid transparent;border-radius:16px;
     padding:8px 10px;
-    display:flex;flex-direction:column;gap:5px;
-    box-shadow:0 14px 36px rgba(8,14,22,.16)}
+    display:flex;flex-direction:column;gap:5px}
+  @media (prefers-color-scheme: dark){
+    #lyrics{background:radial-gradient(115% 90% at 50% 42%, rgba(0,0,0,.62), rgba(0,0,0,.40) 66%, rgba(0,0,0,.28));
+      text-shadow:0 2px 8px rgba(0,0,0,.45)}
+  }
   #lyrics.hidden{display:none}
   #lyrics.sizing{border-color:var(--sub)}
   #lyrics.dragging{cursor:grabbing;border-color:var(--sub)}
