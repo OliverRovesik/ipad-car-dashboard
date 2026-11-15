@@ -23,6 +23,9 @@
 -->
 <style>
   :root{
+    /* 不声明的话 WebKit 可以认为这页是 light-only，于是系统切夜间时压根不更新
+       prefers-color-scheme —— 真机上"有时候颜色不变"就是这个。 */
+    color-scheme:light dark;
     --bg:#eef1f5; --ink:#0d1319; --sub:#68727f; --card:rgba(255,255,255,.82);
     --line:rgba(120,132,148,.28); --green:#12a15c; --amber:#c98a00; --red:#d92d20;
   }
@@ -1134,6 +1137,15 @@ function applyTheme(){
   for(const m of paintMats) m.envMapIntensity = mq.matches ? SHEEN_NIGHT : SHEEN_DAY;
 }
 mq.addEventListener ? mq.addEventListener('change', applyTheme) : mq.addListener(applyTheme);
+// 系统外观在后台改变时（自动夜间最常见）change 事件不一定补发：回前台无条件重判一次，
+// 并翻个临时类名逼 WebKit 重算样式，否则渲染层会留着旧配色。
+document.addEventListener('visibilitychange', () => {
+  if(document.hidden) return;
+  wasDark = null;
+  const on = document.documentElement;
+  on.classList.add('themeNudge');
+  requestAnimationFrame(() => on.classList.remove('themeNudge'));
+});
 
 let vw = 0, vh = 0;
 function resize(){
@@ -1315,7 +1327,6 @@ function startDemo(){
 if(!startRealGps()) startDemo();                        // 没有 geolocation 就直接进演示
 
 /* ---------- 日期 / 时间 / 天气 ---------- */
-let wxLast = null;
 function tickClock(){
   const n = new Date();
   document.getElementById('clkTime').textContent =
@@ -1338,26 +1349,61 @@ const WXEMO = { 0:'☀️', 1:'🌤️', 2:'⛅', 3:'☁️', 45:'🌫️', 48:'
 // 定位失败/被拒时的兜底：用户在马尼拉
 const FALLBACK = { lat:14.5995, lon:120.9842 };
 const wxEl = document.getElementById('wx');
-function loadWeather(lat, lon){
-  wxLast = [lat, lon];
-  fetch('https://api.open-meteo.com/v1/forecast?latitude=' + (+lat).toFixed(4) +
-        '&longitude=' + (+lon).toFixed(4) + '&current=temperature_2m,weather_code&timezone=auto')
+/* 两个源一条在 Vultr、一条在 AWS CloudFront，蜂窝链路掐掉其中一条时另一个还能出数；
+   超时用 AbortController 兜住 —— 路由黑洞时 fetch 会一直挂着，不报对也不报错。 */
+function getJSON(url, ms){
+  const ac = new AbortController();
+  const timer = setTimeout(() => ac.abort(), ms);
+  return fetch(url, { signal: ac.signal, cache: 'no-store' })
     .then(r => { if(!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
-    .then(j => {
-      const c = j.current || {};
-      const emo = WXEMO[c.weather_code] ? WXEMO[c.weather_code] + ' ' : '';
-      wxEl.textContent = emo + Math.round(c.temperature_2m) + '° ' + (WMO[c.weather_code] || '');
-      wxEl.className = '';
-    })
-    .catch(() => { wxEl.textContent = 'Weather n/a'; wxEl.className = 'bad'; });
+    .catch(e => { throw new Error(e.name === 'AbortError' ? 'timeout' : e.message); })
+    .finally(() => clearTimeout(timer));
 }
+let wxAt = 0;
+function wxShow(code, temp){
+  if(!Number.isFinite(temp)) throw new Error('no data');
+  wxEl.textContent = (WXEMO[code] ? WXEMO[code] + ' ' : '') + Math.round(temp) + '° ' + (WMO[code] || '');
+  wxEl.className = ''; wxAt = Date.now();
+}
+const wxOpenMeteo = (la, lo) => getJSON(
+    'https://api.open-meteo.com/v1/forecast?latitude=' + la.toFixed(4) +
+    '&longitude=' + lo.toFixed(4) + '&current=temperature_2m,weather_code&timezone=auto', 8000)
+  .then(j => wxShow((j.current || {}).weather_code, (j.current || {}).temperature_2m));
+// met.no 给的是 symbol_code 文字（去掉 _day/_night 后缀），按关键字折回 WMO 码。
+const wxWmo = s => !s ? undefined
+  : /thunder/.test(s) ? 95   : /snow|sleet/.test(s) ? 73 : /fog/.test(s) ? 45
+  : /violentrainshow/.test(s) ? 82 : /rainshow/.test(s) ? 80
+  : /heavyrain/.test(s) ? 65  : /moderaterain/.test(s) ? 63 : /lightrain/.test(s) ? 61
+  : /partly/.test(s) ? 2      : /cloud|haze/.test(s) ? 3 : 0;
+const wxMet = (la, lo) => getJSON(
+    'https://api.met.no/weatherapi/locationforecast/2.0/compact?lat=' + la.toFixed(4) +
+    '&lon=' + lo.toFixed(4), 8000)
+  .then(j => {
+    const ts = (((j.properties || {}).timeseries || [])[0] || {}).data || {};
+    const cur = ts.next_1_hours || ts.next_6_hours || {};
+    wxShow(wxWmo(((cur.summary || {}).symbol_code || '').replace(/_(day|night)$/, '')),
+           ((ts.instant || {}).details || {}).air_temperature);
+  });
 // GPS 版：位置由上面的 watchPosition 提供，避免重复申请定位权限
+const WX_OK = 15 * 60 * 1000, WX_RETRY = 60 * 1000;
+let wxTimer = null;
 function refreshWeather(){
-  if(G.lat !== null) loadWeather(G.lat, G.lon);
-  else if(wxLast === null) loadWeather(FALLBACK.lat, FALLBACK.lon);
+  const fixed = Number.isFinite(G.lat) && Number.isFinite(G.lon);
+  const la = fixed ? G.lat : FALLBACK.lat, lo = fixed ? G.lon : FALLBACK.lon;
+  clearTimeout(wxTimer);
+  return wxOpenMeteo(la, lo)
+    .catch(e1 => wxMet(la, lo).catch(e2 => {
+      // 把原因写出来：这一屏是唯一能看到车上真实链路状态的入口
+      wxEl.textContent = 'Weather n/a · ' + (navigator.onLine === false ? 'offline' : e1.message);
+      wxEl.className = 'bad';
+    }))
+    .then(() => { wxTimer = setTimeout(refreshWeather, wxEl.className === 'bad' ? WX_RETRY : WX_OK); });
 }
 refreshWeather();                       // 启动先取一次，否则要等 15 分钟
-setInterval(refreshWeather, 15 * 60 * 1000);
+// 挂起期间 setTimeout 不跑，回前台且数据已过期时立刻补一次
+document.addEventListener('visibilitychange', () => {
+  if(!document.hidden && Date.now() - wxAt > WX_OK) refreshWeather();
+});
 
 /* ---------- 屏幕常亮 ---------- */
 // WebKit 上锁屏或切后台之后，原来的句柄会失效，必须在页面重新可见时重新申请；
