@@ -2054,8 +2054,13 @@ if(location.hash.indexOf('lyricsdemo') >= 0 || location.search.indexOf('lyricsde
   window.CarDashLyrics.setTrack({
     key: 'demo', status: 'ok', title: 'Demo Track', artist: 'CarDash', album: '',
     art: 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxMjAiIGhlaWdodD0iMTIwIj48cmVjdCB3aWR0aD0iMTIwIiBoZWlnaHQ9IjEyMCIgcng9IjE4IiBmaWxsPSIjNWI3Y2ZhIi8+PHRleHQgeD0iNjAiIHk9IjgwIiBmb250LXNpemU9IjU2IiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmaWxsPSIjZmZmZmZmIj7imao8L3RleHQ+PC9zdmc+',
-    duration: 120, playing: true, position: 0, rate: 1,
-    lines: Array.from({ length: 30 }, (_, i) => [i * 2.5 + 1, 'Demo lyric line ' + (i + 1)])
+    duration: 185, playing: true, position: 0, rate: 1,
+    /* 一长一短交替：短句检验正常显示，长句检验放不下时的省略号+向左滚。
+       长句故意用中文（词与词之间没有断行机会，是最不利的情况），
+       每句空 6 秒，够把 700px 的溢出按 60px/s 滚完大半。 */
+    lines: Array.from({ length: 30 }, (_, i) => [i * 6 + 2,
+      i % 2 ? '第' + (i + 1) + '句故意写长：这一行放不下时右端会先亮出省略号，半秒之后整句慢慢向左滚出来'
+            : '第' + (i + 1) + '句 短句正常显示'])
   });
 }
 
