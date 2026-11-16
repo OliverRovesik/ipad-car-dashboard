@@ -1,5 +1,5 @@
 #!/bin/sh
-# 把 GPS 页面和它依赖的 3 个本地文件打进 .app：启动时 WebContent.compose() 拼成自包含 HTML，
+# 把 app 默认页面和它依赖的 3 个本地文件打进 .app：启动时 WebContent.compose() 拼成自包含 HTML，
 # 车的 base64 已经在 model/fiesta.data.js 里，所以整页零网络（只剩装饰性的天气 fetch）。
 # 设备构建和模拟器构建共用这一份，避免两边拷贝清单漂移。
 # 用法: sh app/embed-web.sh <app-dir>
@@ -8,9 +8,16 @@ ROOT=$(cd "$(dirname "$0")/.." && pwd)
 APPDIR=$1
 WEB="$APPDIR/web"
 
+# 页面名只认 WebContent.swift 那一处真源：写死在这里的话，改了 app 加载哪个页面
+# 却忘了改打包，启动就会 compose miss 回落到线上页面包，offline 直接白屏。
+PAGE=$(sed -n 's/.*static let page = "\([^"]*\)".*/\1/p' "$ROOT/app/Sources/WebContent.swift")
+if [ -z "$PAGE" ]; then
+  echo "::error::embed-web: cannot read WebContent.page from app/Sources/WebContent.swift"; exit 1
+fi
+
 mkdir -p "$WEB/vendor" "$WEB/model"
 TOTAL=0
-for f in dashboard-gps.html vendor/three.min.js vendor/GLTFLoader.js model/fiesta.data.js; do
+for f in "$PAGE" vendor/three.min.js vendor/GLTFLoader.js model/fiesta.data.js; do
   SRC="$ROOT/$f"
   if [ ! -s "$SRC" ]; then
     echo "::error::embed-web: missing source $f"; exit 1

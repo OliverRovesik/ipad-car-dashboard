@@ -6,7 +6,9 @@ import Foundation
 // 定位权限、天气 CORS、导航白名单的行为与直接加载线上页面完全一致。
 enum WebContent {
   static let baseURL = URL(string: "https://oliverrovesik.github.io/ipad-car-dashboard/")!
-  static let page = "dashboard-gps.html"
+  // 唯一真源：bundle 打哪个页面、启动加载哪个页面、WebSync 跟哪个页面对版本，全看这一行。
+  // 现在用 FLOW 版；GPS 版仍在仓库和 Pages 上，换回去只改这里，embed-web.sh 会自动跟着读。
+  static let page = "dashboard-flow.html"
   static let assets = ["vendor/three.min.js", "vendor/GLTFLoader.js", "model/fiesta.data.js"]
   static var paths: [String] { [page] + assets }
 
