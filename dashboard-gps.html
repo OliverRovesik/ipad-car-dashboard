@@ -850,17 +850,19 @@ initCat();
 
 // 把车漆/内饰壳在腰线以上切成一个半透明"玻璃罩"：下车身保持实心写深度，
 // 只有顶盖单独透明且不写深度，跟车相机才能看进车厢看到前排乘客。
-const CANOPY_Y = 0.90, CANOPY_ALPHA = 0.22;
-function canopySplit(mesh, yCut, alpha){
+// 光有 y 一刀不够：引擎盖靠后那段本身就有 0.90–1.02 m 高，会被一起切走变成半透明，
+// 看着就是引擎盖上的一块黑。所以再加纵向一刀，只从风挡下沿（cowl，约车头起 36% 车长）往后切。
+const CANOPY_Y = 0.90, CANOPY_ALPHA = 0.22, CANOPY_Z0 = 0.36;
+function canopySplit(mesh, yCut, alpha, zCut){
   mesh.updateWorldMatrix(true, false);
   const g = mesh.geometry.index ? mesh.geometry.toNonIndexed() : mesh.geometry;
   const pos = g.attributes.position, nor = g.attributes.normal, uv = g.attributes.uv;
   const lo = {p:[],n:[],u:[]}, hi = {p:[],n:[],u:[]};
   const v = new THREE.Vector3();
   for(let i = 0; i < pos.count; i += 3){
-    let cy = 0;
-    for(let k = 0; k < 3; k++){ v.fromBufferAttribute(pos, i+k); mesh.localToWorld(v); cy += v.y; }
-    const t = (cy/3) > yCut ? hi : lo;
+    let cy = 0, cz = 0;
+    for(let k = 0; k < 3; k++){ v.fromBufferAttribute(pos, i+k); mesh.localToWorld(v); cy += v.y; cz += v.z; }
+    const t = (cy/3) > yCut && (cz/3) > zCut ? hi : lo;
     for(let k = 0; k < 3; k++){
       t.p.push(pos.getX(i+k), pos.getY(i+k), pos.getZ(i+k));
       if(nor) t.n.push(nor.getX(i+k), nor.getY(i+k), nor.getZ(i+k));
@@ -1081,7 +1083,12 @@ new THREE.GLTFLoader().load(modelURL(), g => {
     if(o.isMesh && !/_canopy$/.test(o.name) &&
        (/M_Paint_Metal_High/.test(o.name) || /M_Internal_Interior_High/.test(o.name))) shells.push(o);
   });
-  for(const o of shells) canopySplit(o, CANOPY_Y, CANOPY_ALPHA);
+  // 切点按车壳自身的世界包围盒算，和 canopySplit 里的 localToWorld 同一坐标系，
+  // 因此不受 CAR_YAW / Z_EGO / 归一化倍率影响。
+  const shellBox = new THREE.Box3();
+  for(const o of shells) shellBox.expandByObject(o);
+  const zCut = shellBox.min.z + CANOPY_Z0 * (shellBox.max.z - shellBox.min.z);
+  for(const o of shells) canopySplit(o, CANOPY_Y, CANOPY_ALPHA, zCut);
   if(PROBE_RIDERS){
     CAM.mode = 'drive'; CAM.k = 1; updateCamera(0);
     car.updateMatrixWorld(true);
