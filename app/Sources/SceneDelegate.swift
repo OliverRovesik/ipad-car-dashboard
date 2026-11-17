@@ -12,6 +12,9 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate, WKNavigationDeleg
   let overlay = UIView()
   let status = UILabel()
   let retry = UIButton(type: .system)
+  // 版本角标：装完包唯一能在设备上自查「哪一版 / 哪一页 / 页面来自哪里」的入口。
+  let badge = UILabel()
+  private var badgeSeq = 0
   private var probed = false
   private var syncStarted = false
 
@@ -80,6 +83,22 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate, WKNavigationDeleg
       retry.bottomAnchor.constraint(equalTo: overlay.bottomAnchor)
     ])
 
+    // 版本角标贴在安全区右下角。isUserInteractionEnabled=false 是关键：它盖在页面上，
+    // 但绝不能吃掉底下任何一个点击（收藏条、歌词卡拉手都在这一带）。
+    badge.font = UIFont.monospacedDigitSystemFont(ofSize: 11, weight: .semibold)
+    badge.textColor = UIColor(white: 0.93, alpha: 1)
+    badge.backgroundColor = UIColor(white: 0, alpha: 0.45)
+    badge.layer.cornerRadius = 5
+    badge.clipsToBounds = true
+    badge.alpha = 0
+    badge.isUserInteractionEnabled = false
+    badge.translatesAutoresizingMaskIntoConstraints = false
+    root.view.addSubview(badge)
+    NSLayoutConstraint.activate([
+      badge.trailingAnchor.constraint(equalTo: root.view.safeAreaLayoutGuide.trailingAnchor, constant: -10),
+      badge.bottomAnchor.constraint(equalTo: root.view.safeAreaLayoutGuide.bottomAnchor, constant: -6)
+    ])
+
     window = w
     w.makeKeyAndVisible()
     cardashTrace("scene connected")
@@ -97,6 +116,7 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate, WKNavigationDeleg
       return
     }
     cardashTrace("compose miss, network fallback")
+    WebContent.servedFrom = "online"
     guard let u = URL(string: DASH_URL) else { show("Bad URL: " + DASH_URL); return }
     web?.load(URLRequest(url: u, cachePolicy: .useProtocolCachePolicy, timeoutInterval: 30))
   }
@@ -110,6 +130,33 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate, WKNavigationDeleg
     status.text = msg
     setOverlay(hidden: false)
     cardashTrace("overlay shown: \(msg)")
+  }
+
+  private var buildStamp: String {
+    let i = Bundle.main.infoDictionary
+    let v = i?["CFBundleShortVersionString"] as? String ?? "?"
+    let b = i?["CFBundleVersion"] as? String ?? "?"
+    // 页面名去掉 dashboard- 前缀和 .html 后缀，只留 gps / flow 这种一眼能认的字样。
+    let page = WebContent.page
+      .replacingOccurrences(of: "dashboard-", with: "")
+      .replacingOccurrences(of: ".html", with: "")
+    return "\(v) (\(b)) · \(page) · \(WebContent.servedFrom)"
+  }
+
+  // 每次页面真正加载完亮 8 秒，然后淡出。行车中不打扰，但装完包、换完页面一开就能看到。
+  // 用序号丢弃过期的淡出：连续两次加载（比如从谷歌地图切回来重拼）时，
+  // 前一次的计时不能把刚亮出来的这一张关掉。
+  private func showBadge() {
+    let stamp = buildStamp
+    badge.text = "  \(stamp)  "
+    badge.alpha = 1
+    badgeSeq += 1
+    let seq = badgeSeq
+    cardashTrace("badge shown \(stamp)")
+    DispatchQueue.main.asyncAfter(deadline: .now() + 8) { [weak self] in
+      guard let s = self, s.badgeSeq == seq else { return }
+      UIView.animate(withDuration: 0.6) { s.badge.alpha = 0 }
+    }
   }
 
   // 新窗口请求：页面里 target="_blank" 的收藏按钮和搜索栏提交都走到这里。
@@ -153,6 +200,7 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate, WKNavigationDeleg
     cardashTrace("load finished \(w.url?.absoluteString ?? "nil")")
     setOverlay(hidden: true)
     cardashTrace("overlay hidden")
+    showBadge()
     if !probed { probed = true; probe(0) }
     if !syncStarted { syncStarted = true; WebSync.run() }
     if let v = web { LyricsBridge.shared.start(v) }

@@ -12,6 +12,10 @@ enum WebContent {
   static let assets = ["vendor/three.min.js", "vendor/GLTFLoader.js", "model/fiesta.data.js"]
   static var paths: [String] { [page] + assets }
 
+  // 最近一次拼页面的来源：bundle / synced / online / none，只给版本角标读。
+  // 「装了新 ipa 却还是旧界面」有两种成因（装的包不对 / 同步副本盖住新页面），靠这一个值就能分开。
+  static var servedFrom = "none"
+
   static var syncedDir: URL {
     FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
       .appendingPathComponent("CarDash/web", isDirectory: true)
@@ -44,10 +48,12 @@ enum WebContent {
   static func compose() -> String? {
     guard let htmlURL = resolve(page),
           let html = try? String(contentsOf: htmlURL, encoding: .utf8) else {
+      servedFrom = "none"
       cardashTrace("compose miss: no readable \(page)")
       return nil
     }
     let source = sourceLabel(of: htmlURL)
+    servedFrom = source
     let out = NSMutableString(string: html)
     var inlined = 0
     let re = try? NSRegularExpression(pattern: "<script src=\"([^\"]+)\"></script>")

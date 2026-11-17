@@ -171,6 +171,13 @@ case "$RES" in
     if ! grep -q "overlay hidden" "$TRACE"; then
       echo "::error::trace lacks 'overlay hidden'"; HARD_FAIL=yes
     fi
+    # 版本角标：证明 Info.plist 版本号 + WebContent.page + servedFrom 这条链真的上到了界面。
+    # 注解里带上原文，匿名取不到 job 日志时也能凭 notice 确认打包的是哪一页。
+    if ! grep -q "badge shown" "$TRACE"; then
+      echo "::error::trace lacks 'badge shown' (version badge never fired)"; HARD_FAIL=yes
+    else
+      echo "::notice::badge: $(grep -o 'badge shown .*' "$TRACE" | tail -1)"
+    fi
     # 歌词桥：模拟器推 30 行假数据后回读页面 DOM，证明 SceneDelegate→LyricsBridge→页面这条链是通的
     if ! grep -q 'lyrics demo push result=.*"rows":30' "$TRACE"; then
       echo "::error::lyrics bridge did not render 30 demo rows"; HARD_FAIL=yes
