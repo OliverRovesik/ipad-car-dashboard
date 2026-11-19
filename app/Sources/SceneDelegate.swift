@@ -22,13 +22,11 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate, WKNavigationDeleg
              options: UIScene.ConnectionOptions) {
     guard let ws = scene as? UIWindowScene else { cardashTrace("no UIWindowScene"); return }
     let w = UIWindow(windowScene: ws)
-    // 底色跟页面 CSS 的 --bg 对齐（浅色 #eef1f5 / 深色 #0e1216）。以前写死近黑 0.06，
-    // 于是任何几何错位都会表现成黑边；同色之后错位顶多看不见。
-    let pageBG = UIColor { tc in
-      tc.userInterfaceStyle == .dark
-        ? UIColor(red: 0x0e/255.0, green: 0x12/255.0, blue: 0x16/255.0, alpha: 1)
-        : UIColor(red: 0xee/255.0, green: 0xf1/255.0, blue: 0xf5/255.0, alpha: 1)
-    }
+    // 底色必须跟"页面实际用的那套"对齐，不是跟系统外观：FLOW 页在 CSS 末尾把 --bg 无条件
+    // 钉成夜间一套（HUD 永远深底），系统浅色模式下页面仍然是 #0e1216。
+    // v1.2.7 那次跟着系统给动态色，等于在浅色模式下把缝里刷成 #eef1f5 —— 比原来写死 0.06
+    // 的黑边更刺眼，这正是他这次还看到一条带的原因。GPS 页的 --bg 才真的跟系统走。
+    let pageBG = Self.pageBackground(for: WebContent.page)
     w.backgroundColor = pageBG
     w.rootViewController = root
     root.view.backgroundColor = w.backgroundColor
@@ -85,9 +83,11 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate, WKNavigationDeleg
 
     // 版本角标贴在安全区右下角。isUserInteractionEnabled=false 是关键：它盖在页面上，
     // 但绝不能吃掉底下任何一个点击（收藏条、歌词卡拉手都在这一带）。
-    badge.font = UIFont.monospacedDigitSystemFont(ofSize: 11, weight: .semibold)
+    badge.font = UIFont.monospacedDigitSystemFont(ofSize: 10, weight: .semibold)
     badge.textColor = UIColor(white: 0.93, alpha: 1)
     badge.backgroundColor = UIColor(white: 0, alpha: 0.45)
+    badge.numberOfLines = 4
+    badge.textAlignment = .center
     badge.layer.cornerRadius = 5
     badge.clipsToBounds = true
     badge.alpha = 0
@@ -132,6 +132,13 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate, WKNavigationDeleg
     cardashTrace("overlay shown: \(msg)")
   }
 
+  private static func pageBackground(for page: String) -> UIColor {
+    let dark = UIColor(red: 0x0e/255.0, green: 0x12/255.0, blue: 0x16/255.0, alpha: 1)
+    let light = UIColor(red: 0xee/255.0, green: 0xf1/255.0, blue: 0xf5/255.0, alpha: 1)
+    if page.hasPrefix("dashboard-flow") { return dark }
+    return UIColor { tc in tc.userInterfaceStyle == .dark ? dark : light }
+  }
+
   private var buildStamp: String {
     let i = Bundle.main.infoDictionary
     let v = i?["CFBundleShortVersionString"] as? String ?? "?"
@@ -143,19 +150,58 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate, WKNavigationDeleg
     return "\(v) (\(b)) · \(page) · \(WebContent.servedFrom)"
   }
 
-  // 每次页面真正加载完亮 8 秒，然后淡出。行车中不打扰，但装完包、换完页面一开就能看到。
+  // 几何读数：这条带到底是"页面没铺到"还是"颜色对不上"，只有这几个数能分开。
+  // 本机没有 UIKit 环境（只有 CLT，跑不了模拟器），所以把数打在屏幕上让他拍一张回来。
+  // 拆两行：合一行是 54 字符 ≈324pt，在 470pt 宽的车窗口里会横贯大半屏。
+  private var geomLines: [String] {
+    let sv = web?.scrollView
+    func n(_ x: CGFloat) -> Int { x.isFinite ? Int(x.rounded()) : -1 }
+    let sa = root.view.safeAreaInsets
+    return ["win \(n(root.view.bounds.height)) web \(n(web?.frame.height ?? -.infinity))"
+              + " safe \(n(sa.top))/\(n(sa.bottom))",
+            "inset \(n(sv?.contentInset.bottom ?? -.infinity))"
+              + " adj \(n(sv?.adjustedContentInset.bottom ?? -.infinity))"
+              + " csize \(n(sv?.contentSize.height ?? -.infinity))"]
+  }
+
+  // 页面自己报的视口高度和 body 实际底色：web 高 == ih 说明页面铺满了；
+  // bg 拿去和 pageBG 对照，就能分清那条带是颜色不匹配还是几何错位。
+  private static let geomJS = "JSON.stringify({ih:innerHeight,ch:document.documentElement.clientHeight,bg:getComputedStyle(document.body).backgroundColor})"
+
+  private func badgeText(_ page: String) -> String {
+    ([buildStamp] + geomLines + [page]).map { "  \($0)  " }.joined(separator: "\n")
+  }
+
+  // 每次页面真正加载完亮 15 秒，然后淡出。行车中不打扰，但装完包、换完页面一开就能看到。
   // 用序号丢弃过期的淡出：连续两次加载（比如从谷歌地图切回来重拼）时，
-  // 前一次的计时不能把刚亮出来的这一张关掉。
+  // 前一次的计时不能把刚亮出来的这一张关掉；页面读数同理，晚到的那份不能盖掉新的一张。
   private func showBadge() {
-    let stamp = buildStamp
-    badge.text = "  \(stamp)  "
-    badge.alpha = 1
     badgeSeq += 1
     let seq = badgeSeq
-    cardashTrace("badge shown \(stamp)")
-    DispatchQueue.main.asyncAfter(deadline: .now() + 8) { [weak self] in
+    badge.text = badgeText("reading…")
+    badge.alpha = 1
+    cardashTrace("badge shown \(buildStamp) | " + geomLines.joined(separator: " "))
+    readPageGeom(seq, 0)
+    DispatchQueue.main.asyncAfter(deadline: .now() + 15) { [weak self] in
       guard let s = self, s.badgeSeq == seq else { return }
       UIView.animate(withDuration: 0.6) { s.badge.alpha = 0 }
+    }
+  }
+
+  // 读不到就每秒重试：慢 runner 上 evaluateJavaScript 会排在页面自己的长任务后面
+  // （歌词回读当年就是这么误判的），一次扑空不能把这条诊断行整个丢掉。
+  private func readPageGeom(_ seq: Int, _ attempt: Int) {
+    web?.evaluateJavaScript(Self.geomJS) { [weak self] r, e in
+      guard let s = self, s.badgeSeq == seq else { return }
+      if let p = r as? String {
+        s.badge.text = s.badgeText(p)
+        cardashTrace("badge page \(p)")
+        return
+      }
+      cardashTrace("badge page retry \(attempt) \(e?.localizedDescription ?? "nil result")")
+      if attempt < 4 {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1) { s.readPageGeom(seq, attempt + 1) }
+      }
     }
   }
 
