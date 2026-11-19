@@ -63,15 +63,17 @@
   #speedunit{font-size:17px;color:var(--sub);font-weight:600;margin-top:2px}
 
   /* 汇聚点上的车速：left/top 每帧由 drawFlowBg 写，字号按车速写内联 style。
-     必须 pointer-events:none —— 它正好压在车模上，留着命中就会吃掉轨道拖拽。 */
+     必须 pointer-events:none —— 它正好压在车模上，留着命中就会吃掉轨道拖拽。
+     基准是日间形态（白色光晕把字从浅场里垫起来），夜间那套黑色渐层在下面的 dark 块里覆盖。 */
   #flowRead{position:fixed;left:50%;top:32%;transform:translate(-50%,0);
     display:flex;flex-direction:column;align-items:center;
     gap:clamp(4px,.9vh,10px);pointer-events:none;text-align:center;
-    text-shadow:0 3px 12px rgba(0,0,0,.30)}
+    text-shadow:0 3px 12px rgba(255,255,255,.75)}
+  /* G 表面板：同上，基准是日间的白色渐层，夜间改回压暗渐层。 */
   #gWrap{left:clamp(10px,2.2vw,26px);top:clamp(80px,10vh,130px);   /* 80 起：topbar 占 13-76，之前 71 会压住它 5px */
     width:clamp(112px,26vw,150px);pointer-events:none;padding:2px;
-    background:radial-gradient(115% 90% at 50% 42%, rgba(0,0,0,.34), rgba(0,0,0,.10) 66%, rgba(0,0,0,0));
-    text-shadow:0 2px 8px rgba(0,0,0,.45)}
+    background:radial-gradient(115% 90% at 50% 42%, rgba(255,255,255,.92), rgba(255,255,255,.78) 62%, rgba(255,255,255,.28));
+    text-shadow:0 2px 8px rgba(255,255,255,.55)}
   #gCv{width:100%;aspect-ratio:1;display:block}
 
   /* 右上：OBD 读数 */
@@ -158,8 +160,8 @@
      数据来自原生壳（Apple Music 的 now-playing 状态 + 专辑封面），网页只负责按时间轴滚动。 */
   #lyrics{width:clamp(232px,19vw,248px);
     position:relative;
-    background:radial-gradient(115% 90% at 50% 42%, rgba(0,0,0,.34), rgba(0,0,0,.10) 66%, rgba(0,0,0,0));
-    text-shadow:0 2px 8px rgba(0,0,0,.45);
+    background:radial-gradient(115% 90% at 50% 42%, rgba(255,255,255,.92), rgba(255,255,255,.78) 62%, rgba(255,255,255,.28));
+    text-shadow:0 2px 8px rgba(255,255,255,.55);
     border:1px solid transparent;border-radius:16px;
     padding:8px 10px;
     display:flex;flex-direction:column;gap:5px}
@@ -221,24 +223,35 @@
     border-right:2px solid var(--sub);border-bottom:2px solid var(--sub);
     border-radius:0 0 8px 0;opacity:.6}
 
-  /* iPad 开夜间模式时整屏跟着变暗 */
+  /* iPad 开夜间模式时整屏跟着变暗。以前这里之后还有一条不带媒体查询的 :root，
+     把覆盖层无条件钉成夜间一套（因为 FLOW 场当时只有暗色霓虹一种形态）——
+     日间版上线后那条锁必须拆掉，否则浅色模式下近白文字压在浅色场上等于没有字。
+     夜间这一套现在是这里的默认值，浅色由 :root 基准值负责。 */
   @media (prefers-color-scheme: dark){
     :root{
       --bg:#0e1216; --ink:#eef2f7; --sub:#8b98a8; --card:rgba(22,28,36,.82);
       --line:rgba(150,165,185,.2); --green:#2fd07d; --amber:#f0b429; --red:#ff5c5c;
     }
     #wlwarn.hidden{display:none}
-  .chip.sim{color:#f0c060;background:rgba(120,86,10,.5);border-color:rgba(200,150,20,.3)}
+    .chip.sim{color:#f0c060;background:rgba(120,86,10,.5);border-color:rgba(200,150,20,.3)}
+    /* 这三块在夜间回到"压暗渐层 + 黑色光晕"，和日间版之前的写法逐字一致 */
+    #flowRead{text-shadow:0 3px 12px rgba(0,0,0,.30)}
+    #gWrap{background:radial-gradient(115% 90% at 50% 42%, rgba(0,0,0,.34), rgba(0,0,0,.10) 66%, rgba(0,0,0,0));
+      text-shadow:0 2px 8px rgba(0,0,0,.45)}
+    #lyrics{background:radial-gradient(115% 90% at 50% 42%, rgba(0,0,0,.34), rgba(0,0,0,.10) 66%, rgba(0,0,0,0));
+      text-shadow:0 2px 8px rgba(0,0,0,.45)}
   }
-
-  /* FLOW 版背景恒为暗色霓虹场，所以覆盖层配色一律锁在夜间那一套：
-     同特异度、写在媒体查询之后，因此系统白天/夜间都不再影响卡片和文字。
-     3D 车模的昼夜光照仍然跟系统走 —— 那是打光，不是配色。 */
-  :root{
-    --bg:#0e1216; --ink:#eef2f7; --sub:#8b98a8; --card:rgba(22,28,36,.82);
-    --line:rgba(150,165,185,.2); --green:#2fd07d; --amber:#f0b429; --red:#ff5c5c;
+  /* 日间版：TRIP 一直是裸字浮在场面上，夜间靠暗场垫着（探针实测 2.4–2.95，本来就将就），
+     日间我的笔触会把最坏值再压一截到 2.69，所以只给浅色一套补一块玻璃底板，
+     和 .card/.chip 同一套语言。夜间一个字没改。 */
+  @media (prefers-color-scheme: light){
+    /* FLOW 的日间场是"会动的浅色染色场"，不是 GPS 那种静态浅底：一支饱和笔触扫到文字底下，
+       GPS 那套强调色就当场同色相撞 —— 实测 READY（#12a15c，亮度 0.28）压在黄绿线上只有 1.89，
+       档位字母的 --sub 也只有 2.8。这里只在本页压深一档，基准 :root 仍和 GPS 页一致。 */
+    :root{--sub:#55606d; --green:#0c7a44; --amber:#8a5d00; --red:#b81f16}
+    #trip{background:var(--card);-webkit-backdrop-filter:blur(14px);backdrop-filter:blur(14px);
+      border:1px solid var(--line);border-radius:14px;padding:7px 11px}
   }
-  .chip.sim{color:#f0c060;background:rgba(120,86,10,.5);border-color:rgba(200,150,20,.3)}
 </style>
 </head>
 <body>
@@ -1180,10 +1193,45 @@ e => {
 
 /* ---------- 昼夜主题 ---------- */
 const mq = matchMedia('(prefers-color-scheme: dark)');
+
+/* FLOW 场的昼夜常量表。日间版之前，这些数散在 drawFlowBg 的六个绘制段和 drawGScope 里，
+   而且只有夜间一套；现在收成一张表，绘制段只读 FT，昼夜判断集中在 applyTheme。
+   NIGHT 一栏逐字等于当时的字面值（夜间档零回归），DAY 一栏是「弱场强车」：
+   浅染色场 + 减色笔触 + 速度线/粒子数量降档 + 去掉那层全局压暗 veil，
+   改成在读数落点垫一块白色局部光晕 —— 加色发光压在浅场上会把整屏抬成白，必须换成 multiply。 */
+const FLOW_NIGHT = {
+  floor:0x0e1216,
+  baseS:[0.88,0.84,0.90], baseB:[0.18,0.24,0.14],
+  glow1:0.24, glow1p:0.16, glow2:0.22,
+  ribA:[0.02,0.17,0.03], ribSpan:0.17, ribThrust:0.18,
+  lineBlend:'lighter', lineN:[112,64], lineK:[0.23,0.65,0.88], lineEndS:0.16, lineEndB:1,
+  dotBlend:'lighter', dotN:[132,60], dotBase:0.18, dotGain:0.62, dotHalo:0.12, ringK:0.22,
+  dotTint:false, dotC:'hsla(0,0%,100%,',
+  veil:0.4, vigC:'rgba(0,0,0,', vig:[0.27,0.18,0.25],
+  tintB:1, gInk:'rgba(255,255,255,', gRing:[0.22,0.10], gCross:0.12,
+  gLabel:0.85, gSub:0.5, gDot:'#fff', gTintB:1
+};
+const FLOW_DAY = {
+  floor:0xd3dae3,
+  baseS:[0.26,0.20,0.30], baseB:[0.985,0.975,0.96],
+  glow1:0.05, glow1p:0.04, glow2:0.045,
+  ribA:[0.02,0.075,0.03], ribSpan:0.08, ribThrust:0.08,
+  lineBlend:'multiply', lineN:[70,40], lineK:[0.10,0.28,0.36], lineEndS:0.66, lineEndB:0.62,
+  dotBlend:'multiply', dotN:[80,40], dotBase:0.08, dotGain:0.26, dotHalo:0.05, ringK:0.09,
+  dotTint:true, dotC:'rgba(22,28,36,',
+  veil:0, vigC:'rgba(255,255,255,', vig:[0.42,0.20,0.26],
+  tintB:0.68, gInk:'rgba(0,0,0,', gRing:[0.30,0.14], gCross:0.16,
+  gLabel:0.78, gSub:0.45, gDot:'#12171d', gTintB:0.42
+};
+let FT = mq.matches ? FLOW_NIGHT : FLOW_DAY;
+
 function applyTheme(){
   const t = mq.matches ? THEME.dark : THEME.light;
-  // 路面系几何在 FLOW 版不存在，scene.background 也是 null，这里只转打光和地面色调
-  floor.material.color.copy(s2l(0x0e1216));  // 恒深底：霓虹要从车脚下透出来
+  FT = mq.matches ? FLOW_NIGHT : FLOW_DAY;
+  // 路面系几何在 FLOW 版不存在，scene.background 也是 null，这里只转打光和地面色调。
+  // 车脚下那块 140m 平面以前恒深底（霓虹要从车脚透出来），日间版换成浅色棚地，
+  // 否则浅场里车底托着一块黑饼。
+  floor.material.color.copy(s2l(FT.floor));
   TH = t; themeK = mq.matches ? 0.42 : 1; hemi.groundColor.setHex(t.ground);
   applyLighting();
   for(const b of beams) b.material.opacity = t.beam;           // 夜间路面光池
@@ -1243,7 +1291,7 @@ const flowCtx = flowCv.getContext('2d');
 const FLOW = { travel:0, drift:0, driftV:0, thrust:0, thrustV:0, low:false, ema:1/60,
                speed:0, power:0, intensity:0, hue:0.54, lat:0, lon:0 };
 const FLOW_THRESHOLD = 30;          // 马尼拉堵车，60km/h 才出速度线基本看不见东西
-const FLOW_VEIL = 0.4;              // 背景整体压暗系数（0 = 原样，1 = 全黑）
+// 背景整体压暗系数搬进了 FLOW_NIGHT.veil（日间不做全局压暗），昼夜判断只在 applyTheme 一处。
 
 /* ---------- G 表（GPeaks + GScope，逐行照抄 DriveCore.swift / FlowVisual.swift） ----------
    分箱用的是"屏幕空间惯性"：右 = -横向，下 = 纵向。所以四个峰值标签是 rear 在上、front 在下、
@@ -1275,13 +1323,13 @@ function drawGScope(hue, lat, lon, avail){
   const c = gCtx;
   c.setTransform(dpr, 0, 0, dpr, 0, 0);
   c.clearRect(0, 0, s, s);
-  const cx = s/2, cy = s/2, r = s*0.30, tint = a => hsb(hue, 0.78, 1, a);
+  const cx = s/2, cy = s/2, r = s*0.30, tint = a => hsb(hue, 0.78, FT.gTintB, a);
   for(const k of [0.33, 0.66, 1]){
-    c.strokeStyle = 'rgba(255,255,255,' + (k === 1 ? 0.22 : 0.1) + ')';
+    c.strokeStyle = FT.gInk + (k === 1 ? FT.gRing[0] : FT.gRing[1]) + ')';
     c.lineWidth = 0.7;
     c.beginPath(); c.arc(cx, cy, r*k, 0, 6.2832); c.stroke();
   }
-  c.strokeStyle = 'rgba(255,255,255,.12)'; c.lineWidth = 0.7; c.setLineDash([2,5]);
+  c.strokeStyle = FT.gInk + FT.gCross + ')'; c.lineWidth = 0.7; c.setLineDash([2,5]);
   c.beginPath(); c.moveTo(cx-r, cy); c.lineTo(cx+r, cy);
   c.moveTo(cx, cy-r); c.lineTo(cx, cy+r); c.stroke(); c.setLineDash([]);
   const sc = gpkScale();
@@ -1304,7 +1352,7 @@ function drawGScope(hue, lat, lon, avail){
   const lf = '500 ' + Math.max(9, s*0.072).toFixed(1) + 'px ' + RF,
         mf = '600 ' + Math.max(8, s*0.063).toFixed(1) + 'px ' + RF,
         of = '400 ' + Math.max(8, s*0.057).toFixed(1) + 'px ' + RF,
-        lc = 'rgba(255,255,255,.85)';
+        lc = FT.gInk + FT.gLabel + ')';
   const lfH = Math.max(9, s*0.072), mfH = Math.max(8, s*0.063), ofH = Math.max(8, s*0.057);
   const edge = Math.max(1, s*0.012), side = Math.max(11, s*0.115);
   const rowTop = edge + mfH + 2 + lfH/2, rowBot = s - edge - ofH - 2 - lfH/2;
@@ -1313,7 +1361,7 @@ function drawGScope(hue, lat, lon, avail){
   lab(GPK.right.toFixed(2), side, cy, lf, lc);                             // 左=右向峰值
   lab(GPK.left.toFixed(2), s-side, cy, lf, lc);                             // 右=左向峰值
   lab('MAX ' + GPK.maximum.toFixed(2) + ' G', cx, edge, mf, tint(1), 'top');
-  lab('outer ' + sc.toFixed(1) + ' G', cx, s-edge, of, 'rgba(255,255,255,.5)', 'bottom');
+  lab('outer ' + sc.toFixed(1) + ' G', cx, s-edge, of, FT.gInk + FT.gSub + ')', 'bottom');
   if(!avail) return;                                   // 没有 IMU 就只留刻度和包络
   const mag = Math.max(sc, Math.hypot(lat, lon));
   const px = cx + lat/mag*r, py = cy - lon/mag*r;
@@ -1324,7 +1372,7 @@ function drawGScope(hue, lat, lon, avail){
   const gl = c.createRadialGradient(px, py, 0, px, py, 10);   // 原实现是 blur(7)，渐变等效且不用滤镜
   gl.addColorStop(0, tint(0.6)); gl.addColorStop(1, tint(0));
   c.fillStyle = gl; c.beginPath(); c.arc(px, py, 10, 0, 6.2832); c.fill();
-  c.fillStyle = '#fff'; c.beginPath(); c.arc(px, py, 3.5, 0, 6.2832); c.fill();
+  c.fillStyle = FT.gDot; c.beginPath(); c.arc(px, py, 3.5, 0, 6.2832); c.fill();
 }
 
 /* 大号车速摆到速度线汇聚点：字号按 growth 放大，抖动按 energy 加幅加频。原实现只有 ±1.6pt，
@@ -1369,7 +1417,7 @@ function drawFlowBg(dt, t){
   FLOW.intensity = iv*iv*(3 - 2*iv);
   FLOW.hue = 0.54 - Math.min(speed/150, 1)*0.49;
   const hue = FLOW.hue, power = FLOW.power, intensity = FLOW.intensity;
-  const tintA = a => hsb(hue, 0.78, 1, a);
+  const tintA = a => hsb(hue, 0.78, FT.tintB, a);
   const step = Math.min(0.05, Math.max(0, dt))/4;
   for(let k=0;k<4;k++){
     FLOW.driftV  += (72*(Math.max(-0.6, Math.min(0.6, -latG)) - FLOW.drift)  - 12*FLOW.driftV)  * step;
@@ -1393,19 +1441,19 @@ function drawFlowBg(dt, t){
 
   /* 1. 满屏底色（原实现三档，canvas 的线性渐变按位置排：中间档挪到 0.5） */
   const g = c.createLinearGradient(0, 0, w, h);
-  g.addColorStop(0,   hsb(hue+0.035, 0.88, 0.18, 1));
-  g.addColorStop(0.5, hsb(hue,       0.84, 0.24, 1));
-  g.addColorStop(1,   hsb(Math.max(0, hue-0.045), 0.90, 0.14, 1));
+  g.addColorStop(0,   hsb(hue+0.035, FT.baseS[0], FT.baseB[0], 1));
+  g.addColorStop(0.5, hsb(hue,       FT.baseS[1], FT.baseB[1], 1));
+  g.addColorStop(1,   hsb(Math.max(0, hue-0.045), FT.baseS[2], FT.baseB[2], 1));
   c.fillStyle = g; c.fillRect(0, 0, w, h);
 
   /* 2. 两团辉光。原实现外面套了一层 blur，但那层 blur 糊的只是两个径向渐变本身，
         渐变早就是平滑的 —— 省掉 filter:blur 在 WKWebView 上等于省一整屏的高斯。 */
   const sway0 = Math.sin(t*0.24)*w*0.08;
-  const gl = [[w*0.08 + bend*0.8 + sway0, h*0.58, mx*0.82, tintA(0.24 + power*0.16)],
-              [w*0.97 + bend*0.5,         h*0.25, mx*0.67, hsb(hue+0.09, 0.75, 1, 0.22)]];
+  const gl = [[w*0.08 + bend*0.8 + sway0, h*0.58, mx*0.82, tintA(FT.glow1 + power*FT.glow1p)],
+              [w*0.97 + bend*0.5,         h*0.25, mx*0.67, hsb(hue+0.09, 0.75, FT.tintB, FT.glow2)]];
   for(const [gx, gy, gr, col] of gl){
     const rg = c.createRadialGradient(gx, gy, 0, gx, gy, gr);
-    rg.addColorStop(0, col); rg.addColorStop(1, hsb(hue, 0.78, 1, 0));
+    rg.addColorStop(0, col); rg.addColorStop(1, hsb(hue, 0.78, FT.tintB, 0));
     c.fillStyle = rg; c.fillRect(0, 0, w, h);
   }
 
@@ -1415,9 +1463,9 @@ function drawFlowBg(dt, t){
     const f = i/17;
     const sw = Math.sin(t*0.26 + f*2.4)*w*0.035;
     const lg = c.createLinearGradient(0, h, w, 0);
-    lg.addColorStop(0,   tintA(0.02));
-    lg.addColorStop(0.5, tintA(0.17 + f*0.17 + Math.abs(thrust)*0.18));
-    lg.addColorStop(1,   tintA(0.03));
+    lg.addColorStop(0,   tintA(FT.ribA[0]));
+    lg.addColorStop(0.5, tintA(FT.ribA[1] + f*FT.ribSpan + Math.abs(thrust)*FT.ribThrust));
+    lg.addColorStop(1,   tintA(FT.ribA[2]));
     c.strokeStyle = lg; c.lineWidth = i % 5 === 0 ? 2.4 : 0.8;
     c.beginPath();
     c.moveTo(-w*0.3 + f*w*0.30, h*1.1);
@@ -1427,10 +1475,11 @@ function drawFlowBg(dt, t){
     c.stroke();
   }
 
-  /* 4. 速度线：只有超过阈值才出，加色混合 */
+  /* 4. 速度线：只有超过阈值才出。夜间是加色发光的霓虹；日间不能再用 lighter ——
+        加色压在浅场上会把整屏抬成一片白，改成 multiply 的深色笔触（弱场强车）。 */
   if(speed >= FLOW_THRESHOLD - 0.5){   // -0.5：数字是四舍五入的，读到 30 就该看见线
-    c.globalCompositeOperation = 'lighter';
-    const n = FLOW.low ? 64 : 112;
+    c.globalCompositeOperation = FT.lineBlend;
+    const n = FLOW.low ? FT.lineN[1] : FT.lineN[0];
     for(let i=0;i<n;i++){
       const seed = i, ang = seed*2.39996323;
       const sc = Math.sin(seed*127.1 + 17.7)*43758.5453;
@@ -1446,20 +1495,20 @@ function drawFlowBg(dt, t){
       const path = () => { c.beginPath(); c.moveTo(sx, sy);
         c.quadraticCurveTo((sx+ex)/2 - drift*w*phase*0.12, (sy+ey)/2, ex, ey); };
       const g1 = c.createLinearGradient(sx, sy, ex, ey);
-      g1.addColorStop(0, tintA(0)); g1.addColorStop(1, tintA(opacity*0.23));
+      g1.addColorStop(0, tintA(0)); g1.addColorStop(1, tintA(opacity*FT.lineK[0]));
       c.strokeStyle = g1; c.lineWidth = width*4; c.lineCap = 'butt'; path(); c.stroke();
       const g2 = c.createLinearGradient(sx, sy, ex, ey);
       g2.addColorStop(0,    tintA(0));
-      g2.addColorStop(0.45, tintA(opacity*0.65));
-      g2.addColorStop(1,    hsb(hue, 0.16, 1, opacity*0.88));
+      g2.addColorStop(0.45, tintA(opacity*FT.lineK[1]));
+      g2.addColorStop(1,    hsb(hue, FT.lineEndS, FT.lineEndB, opacity*FT.lineK[2]));
       c.strokeStyle = g2; c.lineWidth = width; c.lineCap = 'round'; path(); c.stroke();
     }
   }
 
   /* 5. 粒子 + 压力环 */
   if(speed > 3){
-    c.globalCompositeOperation = 'lighter';
-    const n = FLOW.low ? 60 : 132;
+    c.globalCompositeOperation = FT.dotBlend;
+    const n = FLOW.low ? FT.dotN[1] : FT.dotN[0];
     for(let i=0;i<n;i++){
       const seed = i;
       const hsh = Math.sin(seed*91.73 + 8.2)*19341.913, off = FRAC(hsh);
@@ -1470,18 +1519,18 @@ function drawFlowBg(dt, t){
       const px = cx + Math.cos(ang+swirl)*w*0.8*radius + drift*w*phase*phase*0.25;
       const py = cy + Math.sin(ang)*h*0.8*radius + thrust*h*phase*0.12;
       const density = Math.min(1, Math.max(0, (22 + power*110 - seed)/8));
-      const alpha = Math.sin(phase*Math.PI)*density*(0.18 + power*0.62)*Math.min(1, speed/25);
+      const alpha = Math.sin(phase*Math.PI)*density*(FT.dotBase + power*FT.dotGain)*Math.min(1, speed/25);
       const r = (0.7 + off*1.4)*(0.6 + phase)*(1 + power*0.4);
-      c.fillStyle = tintA(alpha*0.12);
+      c.fillStyle = tintA(alpha*FT.dotHalo);
       c.beginPath(); c.arc(px, py, r*3, 0, 6.2832); c.fill();
-      c.fillStyle = 'hsla(0,0%,100%,' + alpha.toFixed(3) + ')';
+      c.fillStyle = FT.dotTint ? tintA(alpha) : FT.dotC + alpha.toFixed(3) + ')';
       c.beginPath(); c.arc(px, py, r, 0, 6.2832); c.fill();
     }
     const force = Math.min(1, Math.abs(thrust)*2.4);
     if(force > 0.03) for(let i=0;i<3;i++){
       const phase = FRAC(travel*0.5 + i/3);
       const radius = 0.3 + phase*1.15;
-      c.strokeStyle = tintA(force*power*Math.sin(phase*Math.PI)*0.22);
+      c.strokeStyle = tintA(force*power*Math.sin(phase*Math.PI)*FT.ringK);
       c.lineWidth = 1 + phase*2;
       c.beginPath();
       c.ellipse(cx, cy, w*radius*0.6, h*radius*0.35, 0, 0, 6.2832);
@@ -1489,20 +1538,24 @@ function drawFlowBg(dt, t){
     }
   }
 
-  /* 6. 压暗：原实现是全屏独享的视觉，这里它只是车模的背景 —— 高速时加色混合会把
-        整屏抬成亮黄，左上角白色车速压在黄底上就看不清了。乘一层灰按比例压暗，色相不动。 */
-  c.globalCompositeOperation = 'multiply';
-  c.fillStyle = 'rgba(0,0,0,' + FLOW_VEIL + ')';
-  c.fillRect(0, 0, w, h);
+  /* 6. 压暗：夜间那层全屏 multiply 是为了把高速加色抬出来的亮黄压回去（左上角白色车速
+        压在黄底上就看不清了）。日间本来就是浅场、也没有加色发光，再压一层只会发灰，所以整段跳过。 */
+  if(FT.veil > 0){
+    c.globalCompositeOperation = 'multiply';
+    c.fillStyle = 'rgba(0,0,0,' + FT.veil + ')';
+    c.fillRect(0, 0, w, h);
+  }
 
-  /* 7. 暗角：读数后面压一块局部对比，上下再各压一道 */
+  /* 7. 读数落点的局部对比 + 上下两道带。夜间压黑（把字从亮场里挖出来），
+        日间反相成压白（把深色数字从浅场上垫起来），所以颜色和强度都走 FT。 */
   c.globalCompositeOperation = 'source-over';
+  const vcol = a => FT.vigC + a + ')';
   const vg = c.createRadialGradient(cx, cy, 0, cx, cy, mn*0.45);
-  vg.addColorStop(0, 'rgba(0,0,0,.27)'); vg.addColorStop(1, 'rgba(0,0,0,0)');
+  vg.addColorStop(0, vcol(FT.vig[0])); vg.addColorStop(1, vcol(0));
   c.fillStyle = vg; c.fillRect(0, 0, w, h);
   const lg = c.createLinearGradient(0, 0, 0, h);
-  lg.addColorStop(0, 'rgba(0,0,0,.18)');  lg.addColorStop(0.18, 'rgba(0,0,0,0)');
-  lg.addColorStop(0.78, 'rgba(0,0,0,0)'); lg.addColorStop(1, 'rgba(0,0,0,.25)');
+  lg.addColorStop(0, vcol(FT.vig[1]));  lg.addColorStop(0.18, vcol(0));
+  lg.addColorStop(0.78, vcol(0)); lg.addColorStop(1, vcol(FT.vig[2]));
   c.fillStyle = lg; c.fillRect(0, 0, w, h);
 
   /* 8. G 表包络每帧吃一次当前 G；车速数字摆到这一帧的汇聚点上 —— cx/cy 已经含转弯和
