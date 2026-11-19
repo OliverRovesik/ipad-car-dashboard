@@ -69,11 +69,11 @@
     display:flex;flex-direction:column;align-items:center;
     gap:clamp(4px,.9vh,10px);pointer-events:none;text-align:center;
     text-shadow:0 3px 12px rgba(255,255,255,.75)}
-  /* G 表面板：同上，基准是日间的白色渐层，夜间改回压暗渐层。 */
+  /* G 表面板：基准只留几何。底色两套互斥 —— 夜间是压暗渐层（沿用原值），
+     日间改成和 AVG SPEED / ACCURACY 同一套卡片语言（见下面的 light 块）：
+     一块硬边的白色方片浮在会动的浅色场上很扎眼，圆角 + 毛玻璃才和旁边的卡片成一组。 */
   #gWrap{left:clamp(10px,2.2vw,26px);top:clamp(80px,10vh,130px);   /* 80 起：topbar 占 13-76，之前 71 会压住它 5px */
-    width:clamp(112px,26vw,150px);pointer-events:none;padding:2px;
-    background:radial-gradient(115% 90% at 50% 42%, rgba(255,255,255,.92), rgba(255,255,255,.78) 62%, rgba(255,255,255,.28));
-    text-shadow:0 2px 8px rgba(255,255,255,.55)}
+    width:clamp(112px,26vw,150px);pointer-events:none;padding:2px}
   #gCv{width:100%;aspect-ratio:1;display:block}
 
   /* 右上：OBD 读数 */
@@ -160,8 +160,6 @@
      数据来自原生壳（Apple Music 的 now-playing 状态 + 专辑封面），网页只负责按时间轴滚动。 */
   #lyrics{width:clamp(232px,19vw,248px);
     position:relative;
-    background:radial-gradient(115% 90% at 50% 42%, rgba(255,255,255,.92), rgba(255,255,255,.78) 62%, rgba(255,255,255,.28));
-    text-shadow:0 2px 8px rgba(255,255,255,.55);
     border:1px solid transparent;border-radius:16px;
     padding:8px 10px;
     display:flex;flex-direction:column;gap:5px}
@@ -249,6 +247,13 @@
        GPS 那套强调色就当场同色相撞 —— 实测 READY（#12a15c，亮度 0.28）压在黄绿线上只有 1.89，
        档位字母的 --sub 也只有 2.8。这里只在本页压深一档，基准 :root 仍和 GPS 页一致。 */
     :root{--sub:#55606d; --green:#0c7a44; --amber:#8a5d00; --red:#b81f16}
+    /* G 表和歌词卡改用卡片语言：圆角 + 毛玻璃 + 描边，和右边 AVG SPEED / ACCURACY 成一组。
+       以前是一块硬边白色方片浮在会动的浅色场上，很扎眼。两块一起改 ——
+       他当初就要求歌词卡背景和 G 表那块一致。 */
+    #gWrap{padding:8px;background:var(--card);border:1px solid var(--line);border-radius:16px;
+      -webkit-backdrop-filter:blur(14px);backdrop-filter:blur(14px)}
+    #lyrics{background:var(--card);border-color:var(--line);
+      -webkit-backdrop-filter:blur(14px);backdrop-filter:blur(14px)}
     #trip{background:var(--card);-webkit-backdrop-filter:blur(14px);backdrop-filter:blur(14px);
       border:1px solid var(--line);border-radius:14px;padding:7px 11px}
   }
@@ -1714,7 +1719,12 @@ function startDemo(){
     ingest(lat, lon, n<PARKED ? null : ms, 6 + (n%3)*3, hdg, performance.now());
   }, 1000);
 }
-if(!startRealGps()) startDemo();                        // 没有 geolocation 就直接进演示
+// 预览开关：?demo=1 强制走演示航迹。
+// 不然在浏览器里定位一给成功、车在桌上一动不动，速度恒为 0，永远看不到 30km/h 以上
+// 速度线出来和色相从青蓝走向暖色那一段。演示那条 cycle 本身就是 0→96→0 循环 40 秒。
+const DEMO_MODE = /[?&]demo\b/.test(location.search);
+if(DEMO_MODE) startDemo();                              // 真机不带你不会走到另一支
+else if(!startRealGps()) startDemo();                   // 没有 geolocation 就直接进演示
 
 /* ---------- 日期 / 时间 / 天气 ---------- */
 function tickClock(){
