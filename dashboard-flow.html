@@ -2039,6 +2039,36 @@ addEventListener('resize', () => {
   lyrClampPlace();
   catClamp();
 });
+
+/* 分屏首开自检 / 自愈。
+   现象（他 2026-11-20 车上实拍）：快捷指令打开五五开分屏，app 内容只占左上一块，
+   右边和下面露出 app 自己的底色；把中缝随手拖一下再拖回来就正常 ——
+   也就是窗口尺寸变了，但这一次变化没作为 resize 交给页面，布局视口停在启动那一刻。
+   判据只看宽度：高度天生差一个底部安全区（真机角标实测 web 834 / ih 809），
+   拿高度比会天天误触发。
+   修法是把 viewport meta 摘掉再插回去，逼 WebKit 重新算一次布局视口；
+   还没修好就把两个宽度写在提示条上（那是静态文案，JS 只切它的 .gone，不会被覆盖），
+   拍一张照片就能把现场数据带回来。 */
+(function vpHeal(){
+  const meta = document.querySelector('meta[name=viewport]');
+  const hint = document.getElementById('hint');
+  const HINT0 = hint ? hint.textContent : '';
+  let tries = 0;
+  function check(){
+    const vv = window.visualViewport;
+    if(!vv || !meta) return;
+    if(vv.width <= innerWidth * 1.02){          // 正常：布局视口跟得上可见宽度
+      if(tries && hint) hint.textContent = HINT0;
+      return;
+    }
+    if(tries < 3){ tries++; meta.remove(); document.head.appendChild(meta); }
+    dispatchEvent(new Event('resize'));
+    if(hint) hint.textContent = HINT0 + ' · vp ' + Math.round(vv.width) + '/' + innerWidth;
+  }
+  if(window.visualViewport) visualViewport.addEventListener('resize', check);
+  document.addEventListener('visibilitychange', () => { if(!document.hidden) check(); });
+  [300, 1200, 3000, 6000].forEach(ms => setTimeout(check, ms));
+})();
 function lyrBindSize(el, dir){
   el.addEventListener('pointerdown', e => {
     e.preventDefault(); e.stopPropagation();
