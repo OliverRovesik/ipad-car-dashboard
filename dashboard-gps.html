@@ -955,27 +955,39 @@ scene.add(reflQuad);
 
 /* ---------- 大灯光池 ---------- */
 // 相机在车后方，灯罩本身看不见；夜间"开大灯"能被看见的只有铺在路面上的光。
+// 原来是一张 64×256 的纵向线性渐变贴在 1.6m 宽的平面上 —— 两侧不会张开、
+// 边缘只有线性羽化、近车头那端 alpha 直接顶到 .95，于是看着就是"两条平行直边带子 +
+// 一道硬亮线"。改成按近光的物理形状逐像素生成：半宽随距离张开（约 11°）、
+// 横向高斯衰减、纵向先快速升起再按距离衰减，再叠一段很淡的远尾，
+// 这样没有任何一条直边可以当轮廓被眼睛抓住。（与 dashboard-flow.html 同步）
+const BEAM_LEN = 17, BEAM_HALF = 3.4;
 function beamTexture(){
-  const cv = document.createElement('canvas'); cv.width = 64; cv.height = 256;
+  const W = 128, H = 512;                     // 2 的幂：给 WebKit 留 mipmaps 的余地
+  const cv = document.createElement('canvas'); cv.width = W; cv.height = H;
   const x = cv.getContext('2d');
-  // 渐变末端(画布底部)对应贴近车头的一侧：实测反了会亮在远处
-  const g = x.createLinearGradient(0, 0, 0, 256);
-  g.addColorStop(0, 'rgba(255,247,222,0)');
-  g.addColorStop(.58, 'rgba(255,247,222,.34)');
-  g.addColorStop(1, 'rgba(255,247,222,.95)');
-  x.fillStyle = g; x.fillRect(0, 0, 64, 256);
-  const h = x.createLinearGradient(0, 0, 64, 0);           // 两侧羽化
-  h.addColorStop(0, 'rgba(0,0,0,.9)'); h.addColorStop(.5, 'rgba(0,0,0,0)'); h.addColorStop(1, 'rgba(0,0,0,.9)');
-  x.globalCompositeOperation = 'destination-out'; x.fillStyle = h; x.fillRect(0, 0, 64, 256);
+  const img = x.createImageData(W, H), px = img.data;
+  for(let j=0;j<H;j++){
+    const v = j/(H-1);                        // 0=远端，1=贴车头（沿用原来的朝向约定）
+    const dist = (1-v)*BEAM_LEN;              // 离车头多少米
+    const long = (1-Math.exp(-dist/1.1)) * Math.exp(-dist/5.5) + 0.18*Math.exp(-dist/13);
+    const spread = 0.16 + dist*0.20;          // 光锥半宽随距离张开
+    for(let i=0;i<W;i++){
+      const u = (i/(W-1) - 0.5) * 2 * BEAM_HALF;
+      const a = Math.min(1, long * Math.exp(-(u*u)/(spread*spread)*1.7));
+      const k = (j*W + i)*4;
+      px[k] = 255; px[k+1] = 247; px[k+2] = 222; px[k+3] = Math.round(a*255);
+    }
+  }
+  x.putImageData(img, 0, 0);
   return new THREE.CanvasTexture(cv);
 }
 const beamTex = beamTexture();
 for(const bx of [-0.55, 0.55]){
-  const b = new THREE.Mesh(new THREE.PlaneGeometry(1.6, 17),
+  const b = new THREE.Mesh(new THREE.PlaneGeometry(BEAM_HALF*2, BEAM_LEN),
     new THREE.MeshBasicMaterial({ map:beamTex, transparent:true, opacity:0,
                                   blending:THREE.AdditiveBlending, depthWrite:false, fog:false }));
   b.rotation.x = -Math.PI/2;
-  b.position.set(bx, 0.02, -(Z_EGO + CAR_LEN + 8.5));      // 起点贴车头，往前 17m
+  b.position.set(bx, 0.02, -(Z_EGO + CAR_LEN + BEAM_LEN/2));   // 起点贴车头，往前 BEAM_LEN
   scene.add(b); beams.push(b);
 }
 
