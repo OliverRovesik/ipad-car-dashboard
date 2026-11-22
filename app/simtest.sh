@@ -184,6 +184,11 @@ case "$RES" in
       # 软性：这行要等页面自己的长任务排空才回读得到，慢 runner 上可能晚于 trace 拷贝
       echo "::notice::badge page readout not in trace yet (JS 回读慢，不是失败)"
     fi
+    # 安全区注入：关掉自动内缩之后，页面底部让位量全靠这一注，注不上常用条会被 Home 指示条盖住。
+    # 只断言这条链跑到，不断言数值 —— 模拟器和不同窗口尺寸下这个值本来就该变。
+    if ! grep -q "sab [0-9-]*pt via didFinish" "$TRACE"; then
+      echo "::error::trace lacks 'sab <N>pt via didFinish' (--sab 没注入)"; HARD_FAIL=yes
+    fi
     # 歌词桥：模拟器推 30 行假数据后回读页面 DOM，证明 SceneDelegate→LyricsBridge→页面这条链是通的
     if ! grep -q 'lyrics demo push result=.*"rows":30' "$TRACE"; then
       echo "::error::lyrics bridge did not render 30 demo rows"; HARD_FAIL=yes

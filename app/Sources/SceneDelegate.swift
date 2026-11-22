@@ -15,6 +15,7 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate, WKNavigationDeleg
   // 版本角标：装完包唯一能在设备上自查「哪一版 / 哪一页 / 页面来自哪里」的入口。
   let badge = UILabel()
   private var badgeSeq = 0
+  private var lastSab = -1          // 最近一次注入页面的底部安全区高度（pt），角标要报它
   private var probed = false
   private var syncStarted = false
 
@@ -41,9 +42,14 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate, WKNavigationDeleg
     v.allowsBackForwardNavigationGestures = false
     if #available(iOS 16.4, *) { v.isInspectable = true }
     v.underPageBackgroundColor = w.backgroundColor
+    // 关掉 WebKit 的自动安全区内缩。默认 .automatic 会把底部安全区当成 content inset，
+    // 于是窗口 834pt 高、页面只拿到 809pt（他真机角标实测 web 834 / ih 809 / adj 25），
+    // 那 25pt 由 underPageBackgroundColor 画 —— FLOW 的场比 #0e1216 亮，就又成了一条"黑边"。
+    // 现在页面铺满整窗口，让位量改由 pushSafeArea() 把真实高度注成 --sab 交给 CSS。
+    v.scrollView.contentInsetAdjustmentBehavior = .never
     root.view.addSubview(v)
     // 顶边贴安全区避免系统状态栏压住页面；底边铺到窗口边缘，
-    // 否则 Home Indicator 那条安全区会露出 root 的黑色背景（页面已用 env(safe-area-inset-bottom) 让位）。
+    // 否则 Home Indicator 那条安全区会露出底色（页面用 --sab / env() 自己让位）。
     NSLayoutConstraint.activate([
       v.topAnchor.constraint(equalTo: root.view.safeAreaLayoutGuide.topAnchor),
       v.bottomAnchor.constraint(equalTo: root.view.bottomAnchor),
@@ -152,21 +158,24 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate, WKNavigationDeleg
 
   // 几何读数：这条带到底是"页面没铺到"还是"颜色对不上"，只有这几个数能分开。
   // 本机没有 UIKit 环境（只有 CLT，跑不了模拟器），所以把数打在屏幕上让他拍一张回来。
-  // 拆两行：合一行是 54 字符 ≈324pt，在 470pt 宽的车窗口里会横贯大半屏。
+  // 拆两行：合一行太长，470pt 宽的车窗口里会横贯大半屏。
+  // 宽和高都要报：只报高度的版本害我误判过一次分屏首开的方向。
   private var geomLines: [String] {
     let sv = web?.scrollView
+    let wf = web?.frame ?? CGRect(x: 0, y: 0, width: -.infinity, height: -.infinity)
+    let cs = sv?.contentSize ?? CGSize(width: -.infinity, height: -.infinity)
     func n(_ x: CGFloat) -> Int { x.isFinite ? Int(x.rounded()) : -1 }
     let sa = root.view.safeAreaInsets
-    return ["win \(n(root.view.bounds.height)) web \(n(web?.frame.height ?? -.infinity))"
-              + " safe \(n(sa.top))/\(n(sa.bottom))",
+    return ["win \(n(root.view.bounds.width))x\(n(root.view.bounds.height))"
+              + " web \(n(wf.width))x\(n(wf.height)) safe \(n(sa.top))/\(n(sa.bottom))",
             "inset \(n(sv?.contentInset.bottom ?? -.infinity))"
               + " adj \(n(sv?.adjustedContentInset.bottom ?? -.infinity))"
-              + " csize \(n(sv?.contentSize.height ?? -.infinity))"]
+              + " sab \(lastSab) csize \(n(cs.width))x\(n(cs.height))"]
   }
 
-  // 页面自己报的视口高度和 body 实际底色：web 高 == ih 说明页面铺满了；
-  // bg 拿去和 pageBG 对照，就能分清那条带是颜色不匹配还是几何错位。
-  private static let geomJS = "JSON.stringify({ih:innerHeight,ch:document.documentElement.clientHeight,bg:getComputedStyle(document.body).backgroundColor})"
+  // 页面自己报的视口尺寸和 body 实际底色：web 高 == ih 说明页面铺满了；
+  // sab 是页面那边真正读到的让位量，对不上就说明注入没生效。
+  private static let geomJS = "JSON.stringify({iw:innerWidth,ih:innerHeight,ch:document.documentElement.clientHeight,sab:getComputedStyle(document.documentElement).getPropertyValue('--sab').trim(),bg:getComputedStyle(document.body).backgroundColor})"
 
   private func badgeText(_ page: String) -> String {
     ([buildStamp] + geomLines + [page]).map { "  \($0)  " }.joined(separator: "\n")
@@ -202,6 +211,19 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate, WKNavigationDeleg
       if attempt < 4 {
         DispatchQueue.main.asyncAfter(deadline: .now() + 1) { s.readPageGeom(seq, attempt + 1) }
       }
+    }
+  }
+
+  // 把真实的安全区底部高度交给页面（CSS 变量 --sab）。
+  // 关掉 WebKit 自动内缩之后，页面铺满整个窗口，env(safe-area-inset-bottom) 很可能变 0，
+  // 而 Home 指示条的滑动区并没有消失 —— 让位量只能由知道窗口几何的这一侧显式给。
+  // 每次几何变化都重推：分屏比例一改，安全区高度就跟着变。
+  private func pushSafeArea(_ why: String) {
+    guard let v = web else { return }
+    let b = Int(root.view.safeAreaInsets.bottom.rounded())
+    lastSab = b
+    v.evaluateJavaScript("document.documentElement.style.setProperty('--sab','\(b)px')") { _, e in
+      cardashTrace("sab \(b)pt via \(why)\(e.map { " err=\($0.localizedDescription)" } ?? "")")
     }
   }
 
@@ -246,6 +268,7 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate, WKNavigationDeleg
     cardashTrace("load finished \(w.url?.absoluteString ?? "nil")")
     setOverlay(hidden: true)
     cardashTrace("overlay hidden")
+    pushSafeArea("didFinish")          // 先注入再亮角标，角标读到的才是注入后的状态
     showBadge()
     if !probed { probed = true; probe(0) }
     if !syncStarted { syncStarted = true; WebSync.run() }
@@ -270,11 +293,18 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate, WKNavigationDeleg
   // 从谷歌地图切回来时，页面可能被系统回收过，重新拼一次比留一张黑屏好（现在不花流量）
   func sceneDidBecomeActive(_ scene: UIScene) {
     UIApplication.shared.isIdleTimerDisabled = true
+    pushSafeArea("active")
     if let v = web, v.estimatedProgress < 0.99 { load() }
   }
 
   @available(iOS 16.0, *)
   func windowScene(_ ws: UIWindowScene, didUpdateEffectiveGeometry prev: UIWindowScene.Geometry) {
     cardashTrace("scene resize bounds=\(ws.coordinateSpace.bounds) orientation=\(ws.effectiveGeometry.interfaceOrientation.rawValue)")
+    // 分屏比例一改，安全区高度就跟着变，必须重推。但这一刻 safeAreaInsets 往往还没更新
+    // （它是靠 viewSafeAreaInsetsDidChange 稍后才跟上的），所以先推一次再延迟补推一次。
+    pushSafeArea("geometry")
+    DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { [weak self] in
+      self?.pushSafeArea("geometry+0.35")
+    }
   }
 }
