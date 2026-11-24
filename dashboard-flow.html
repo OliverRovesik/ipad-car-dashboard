@@ -251,7 +251,9 @@
     /* FLOW 的日间场是"会动的浅色染色场"，不是 GPS 那种静态浅底：一支饱和笔触扫到文字底下，
        GPS 那套强调色就当场同色相撞 —— 实测 READY（#12a15c，亮度 0.28）压在黄绿线上只有 1.89，
        档位字母的 --sub 也只有 2.8。这里只在本页压深一档，基准 :root 仍和 GPS 页一致。 */
-    :root{--sub:#55606d; --green:#0c7a44; --amber:#8a5d00; --red:#b81f16}
+    :root{--sub:#475361; --green:#086a3a; --amber:#8a5d00; --red:#b81f16}
+    #hint{background:rgba(255,255,255,.72);border:1px solid var(--line);border-radius:20px;
+      padding:6px 13px;-webkit-backdrop-filter:blur(10px);backdrop-filter:blur(10px)}
     /* G 表和歌词卡改用卡片语言：圆角 + 毛玻璃 + 描边，和右边 AVG SPEED / ACCURACY 成一组。
        以前是一块硬边白色方片浮在会动的浅色场上，很扎眼。两块一起改 ——
        他当初就要求歌词卡背景和 G 表那块一致。 */
@@ -1235,14 +1237,14 @@ const FLOW_NIGHT = {
 };
 const FLOW_DAY = {
   floor:0xd3dae3,
-  baseS:[0.26,0.20,0.30], baseB:[0.985,0.975,0.96],
-  glow1:0.05, glow1p:0.04, glow2:0.045,
-  ribA:[0.02,0.075,0.03], ribSpan:0.08, ribThrust:0.08,
-  lineBlend:'multiply', lineN:[70,40], lineK:[0.10,0.28,0.36], lineEndS:0.66, lineEndB:0.62,
-  dotBlend:'multiply', dotN:[80,40], dotBase:0.08, dotGain:0.26, dotHalo:0.05, ringK:0.09,
+  baseS:[0.30,0.24,0.34], baseB:[0.985,0.975,0.96],
+  glow1:0.075, glow1p:0.055, glow2:0.060,
+  ribA:[0.035,0.20,0.055], ribSpan:0.12, ribThrust:0.10,
+  lineBlend:'multiply', lineN:[88,52], lineK:[0.18,0.46,0.58], lineEndS:0.58, lineEndB:0.58,
+  dotBlend:'multiply', dotN:[96,52], dotBase:0.10, dotGain:0.32, dotHalo:0.065, ringK:0.12,
   dotTint:true, dotC:'rgba(22,28,36,',
-  veil:0, vigC:'rgba(255,255,255,', vig:[0.42,0.20,0.26],
-  tintB:0.68, gInk:'rgba(0,0,0,', gRing:[0.30,0.14], gCross:0.16,
+  veil:0, vigC:'rgba(255,255,255,', vig:[0.24,0.24,0.30],
+  tintB:0.74, gInk:'rgba(0,0,0,', gRing:[0.30,0.14], gCross:0.16,
   gLabel:0.78, gSub:0.45, gDot:'#12171d', gTintB:0.42
 };
 let FT = mq.matches ? FLOW_NIGHT : FLOW_DAY;
